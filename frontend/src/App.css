@@ -65,23 +65,36 @@ button {
 .brandIcon {
   width: 36px;
   height: 36px;
+
   display: grid;
   place-items: center;
+
   border-radius: 50%;
   background: #0d7df2;
   color: white;
 }
 
+.brand strong {
+  font-size: 17px;
+  font-weight: 800;
+}
+
 .searchBox {
   height: 44px;
+
   display: flex;
   align-items: center;
   gap: 10px;
 
   padding: 0 16px;
   border-radius: 999px;
+
   background: #f1f3f7;
   border: 1px solid #d9e0ea;
+}
+
+.searchBox span {
+  color: #9aa4b2;
 }
 
 .searchBox input {
@@ -92,15 +105,13 @@ button {
   font-size: 15px;
 }
 
-.searchBox span {
-  color: #9aa4b2;
-}
-
 .siteButton {
   height: 44px;
   padding: 0 22px;
+
   border: 0;
   border-radius: 999px;
+
   background: #0d7df2;
   color: white;
   font-weight: 800;
@@ -109,8 +120,10 @@ button {
 .profileButton {
   width: 44px;
   height: 44px;
+
   border: 0;
   border-radius: 50%;
+
   background: #4f5cf6;
   color: white;
   font-weight: 800;
@@ -130,6 +143,8 @@ button {
 
 .sidebar {
   height: calc(100vh - 108px);
+  min-height: 0;
+
   display: flex;
   flex-direction: column;
 
@@ -150,16 +165,18 @@ button {
 
 .menuItem {
   height: 44px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 14px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
 
+  border: 0;
+  border-radius: 999px;
+  padding: 0 14px;
+
   background: transparent;
   color: #20242b;
+
   font-size: 15px;
   font-weight: 700;
   text-align: left;
@@ -187,10 +204,14 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
+
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .sitePill {
-  height: 38px;
+  min-height: 38px;
+
   display: flex;
   align-items: center;
   gap: 10px;
@@ -201,6 +222,8 @@ button {
 
   background: #e4f1ff;
   color: #0d7df2;
+
+  font-size: 14px;
   font-weight: 800;
   text-align: left;
 }
@@ -208,47 +231,66 @@ button {
 .dot {
   width: 7px;
   height: 7px;
+
   border-radius: 50%;
   background: #0d7df2;
+
   flex-shrink: 0;
 }
 
 .addSite {
   margin-top: auto;
   height: 48px;
+
   border: 0;
   border-top: 1px solid #e5e9f0;
+
   background: transparent;
   color: #0d7df2;
+
   font-weight: 800;
 }
 
 .main {
   min-height: 0;
   overflow-y: auto;
+
   padding: 20px 32px 80px 0;
   box-sizing: border-box;
 }
 
-.main::-webkit-scrollbar {
+.main::-webkit-scrollbar,
+.siteList::-webkit-scrollbar,
+.sourceGroupList::-webkit-scrollbar {
   width: 8px;
 }
 
-.main::-webkit-scrollbar-thumb {
+.main::-webkit-scrollbar-thumb,
+.siteList::-webkit-scrollbar-thumb,
+.sourceGroupList::-webkit-scrollbar-thumb {
   background: #c9d3e5;
   border-radius: 999px;
 }
 
+.main::-webkit-scrollbar-track,
+.siteList::-webkit-scrollbar-track,
+.sourceGroupList::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .loading {
   min-height: 100vh;
+
   display: grid;
   place-items: center;
+
   font-size: 18px;
   font-weight: 700;
 }
 
 .aiBox {
   padding: 28px;
+
   border-radius: 28px;
   background: #eef3ff;
   border: 1px solid #ccd8ff;
@@ -264,11 +306,14 @@ button {
 .aiIcon {
   width: 44px;
   height: 44px;
+
   display: grid;
   place-items: center;
+
   border-radius: 50%;
   background: #e4e7ff;
   color: #6158ff;
+
   flex-shrink: 0;
 }
 
@@ -292,6 +337,7 @@ button {
 
 .aiRow {
   height: 54px;
+
   display: grid;
   grid-template-columns: 34px 1fr auto auto 18px;
   align-items: center;
@@ -303,6 +349,7 @@ button {
 
   background: rgba(255, 255, 255, 0.72);
   color: #171b22;
+
   text-align: left;
   text-decoration: none;
 }
@@ -310,24 +357,36 @@ button {
 .rank {
   width: 26px;
   height: 26px;
+
   display: grid;
   place-items: center;
+
   border-radius: 50%;
   background: #e6e8ff;
   color: #6a62ff;
+
   font-weight: 800;
+}
+
+.aiRow strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aiRow em {
   color: #9ca3af;
   font-style: normal;
+  white-space: nowrap;
 }
 
 .aiRow b {
   padding: 5px 12px;
+
   border-radius: 999px;
   background: #36c963;
   color: white;
+
   font-size: 12px;
 }
 
@@ -344,6 +403,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   margin-bottom: 18px;
 }
 
@@ -364,10 +424,13 @@ button {
 .filterButtons button {
   height: 36px;
   padding: 0 16px;
+
   border: 1px solid #dfe5ef;
   border-radius: 999px;
+
   background: white;
   color: #7a8495;
+
   font-weight: 700;
 }
 
@@ -385,6 +448,7 @@ button {
 
 .noticeCard {
   min-height: 112px;
+
   display: grid;
   grid-template-columns: 52px 1fr auto;
   align-items: center;
@@ -401,11 +465,14 @@ button {
 .noticeLogo {
   width: 44px;
   height: 44px;
+
   display: grid;
   place-items: center;
+
   border-radius: 50%;
   background: #0d7df2;
   color: white;
+
   font-weight: 900;
 }
 
@@ -428,16 +495,19 @@ button {
 
 .keywordList {
   display: flex;
-  gap: 6px;
-  margin-top: 10px;
   flex-wrap: wrap;
+  gap: 6px;
+
+  margin-top: 10px;
 }
 
 .keywordList em {
   padding: 4px 9px;
+
   border-radius: 999px;
   background: #eef3ff;
   color: #4f5cf6;
+
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
@@ -454,30 +524,37 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+
   white-space: nowrap;
 }
 
 .noticeMeta b {
   padding: 6px 12px;
+
   border-radius: 999px;
   background: #f0efff;
   color: #6057e9;
+
   font-size: 12px;
 }
 
 .newBadge {
   padding: 6px 12px;
+
   border-radius: 999px;
   background: #36c963;
   color: white;
+
   font-size: 12px;
 }
 
 .deadlineBadge {
   padding: 6px 12px;
+
   border-radius: 999px;
   background: #ff8a00;
   color: white;
+
   font-size: 12px;
 }
 
@@ -491,4 +568,218 @@ button {
   font-size: 14px;
   font-weight: 800;
   text-decoration: none;
+}
+
+/* 관심 사이트 관리 모달 */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+
+  display: grid;
+  place-items: center;
+
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.sourceModal {
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 80px);
+
+  display: flex;
+  flex-direction: column;
+
+  border-radius: 28px;
+  background: white;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  padding: 28px 30px 20px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.modalHeader p {
+  margin: 0 0 6px;
+  color: #0d7df2;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.modalCloseButton {
+  width: 36px;
+  height: 36px;
+
+  border: 0;
+  border-radius: 50%;
+
+  background: #f1f3f7;
+  color: #697386;
+
+  font-size: 24px;
+  line-height: 1;
+}
+
+.sourceGroupList {
+  padding: 24px 30px;
+  overflow-y: auto;
+}
+
+.sourceGroup {
+  margin-bottom: 26px;
+}
+
+.sourceGroup:last-child {
+  margin-bottom: 0;
+}
+
+.sourceGroup h3 {
+  margin: 0 0 12px;
+  color: #20242b;
+  font-size: 16px;
+}
+
+.sourceCheckList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sourceCheckItem {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+
+  padding: 14px 16px;
+
+  border: 1px solid #e3e8f0;
+  border-radius: 16px;
+  background: #f8fbff;
+}
+
+.sourceCheckItem input {
+  margin-top: 3px;
+}
+
+.sourceCheckItem strong {
+  display: block;
+  margin-bottom: 4px;
+
+  color: #171b22;
+  font-size: 15px;
+}
+
+.sourceCheckItem span {
+  color: #8a93a3;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+
+  padding: 18px 30px 24px;
+  border-top: 1px solid #edf0f5;
+}
+
+.cancelButton,
+.saveButton {
+  height: 42px;
+  padding: 0 20px;
+
+  border: 0;
+  border-radius: 999px;
+
+  font-weight: 800;
+}
+
+.cancelButton {
+  background: #f1f3f7;
+  color: #697386;
+}
+
+.saveButton {
+  background: #0d7df2;
+  color: white;
+}
+
+/* 반응형 */
+
+@media (max-width: 900px) {
+  .app {
+    padding-top: 12px;
+  }
+
+  .header {
+    width: calc(100vw - 24px);
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    padding: 0 16px;
+  }
+
+  .brand strong {
+    display: none;
+  }
+
+  .searchBox {
+    display: none;
+  }
+
+  .layout {
+    width: calc(100vw - 24px);
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main {
+    padding: 16px 0 80px;
+  }
+
+  .noticeTitleRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .noticeCard {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .noticeMeta {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .aiRow {
+    height: auto;
+    min-height: 54px;
+    grid-template-columns: 34px 1fr;
+    padding: 12px 16px;
+  }
+
+  .aiRow em,
+  .aiRow b,
+  .arrow {
+    display: none;
+  }
 }

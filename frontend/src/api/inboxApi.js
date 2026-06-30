@@ -1,4 +1,4 @@
-import { mockInboxNotices } from "../data/mockInboxNotices";
+import { mockInboxNotices } from "../data/mockInboxNotices.js";
 
 const USE_MOCK = true;
 

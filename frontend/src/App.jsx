@@ -3,18 +3,27 @@ import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import AiRecommendBox from "./components/AiRecommendBox";
 import NoticeCard from "./components/NoticeCard";
-import { getMyInboxNotices } from "./api/inboxApi";
+import SourceManageModal from "./components/SourceManageModal";
+import { getMyInboxNotices } from "./api/inboxApi.js";
+import { getNoticeSources } from "./api/sourceApi.js";
 import "./App.css";
 
 function App() {
   const [notices, setNotices] = useState([]);
+  const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
 
   useEffect(() => {
-    async function loadNotices() {
+    async function loadInitialData() {
       try {
-        const data = await getMyInboxNotices();
-        setNotices(data);
+        const [noticeData, sourceData] = await Promise.all([
+          getMyInboxNotices(),
+          getNoticeSources(),
+        ]);
+
+        setNotices(noticeData);
+        setSources(sourceData);
       } catch (error) {
         console.error(error);
       } finally {
@@ -22,8 +31,17 @@ function App() {
       }
     }
 
-    loadNotices();
+    loadInitialData();
   }, []);
+
+  const handleSaveSources = (selectedIds) => {
+    setSources((prevSources) =>
+      prevSources.map((source) => ({
+        ...source,
+        isSubscribed: selectedIds.includes(source.id),
+      })),
+    );
+  };
 
   if (loading) {
     return <div className="loading">공지 목록을 불러오는 중...</div>;
@@ -31,10 +49,13 @@ function App() {
 
   return (
     <div className="app">
-      <Header />
+      <Header onOpenSources={() => setIsSourceModalOpen(true)} />
 
       <div className="layout">
-        <Sidebar />
+        <Sidebar
+          sources={sources}
+          onOpenSources={() => setIsSourceModalOpen(true)}
+        />
 
         <main className="main">
           <AiRecommendBox notices={notices} />
@@ -61,6 +82,14 @@ function App() {
           </section>
         </main>
       </div>
+
+      {isSourceModalOpen && (
+        <SourceManageModal
+          sources={sources}
+          onClose={() => setIsSourceModalOpen(false)}
+          onSave={handleSaveSources}
+        />
+      )}
     </div>
   );
 }

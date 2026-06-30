@@ -1,4 +1,4 @@
-function Header() {
+function Header({ onOpenSources }) {
   return (
     <header className="header">
       <div className="brand">
@@ -11,7 +11,10 @@ function Header() {
         <input placeholder="공지·사이트 검색" />
       </div>
 
-      <button className="siteButton">관심 사이트 관리</button>
+      <button className="siteButton" onClick={onOpenSources}>
+        관심 사이트 관리
+      </button>
+
       <button className="profileButton">김</button>
     </header>
   );

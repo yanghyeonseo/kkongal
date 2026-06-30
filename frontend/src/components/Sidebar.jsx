@@ -1,12 +1,6 @@
-const sites = [
-  "서울대 컴공 공지",
-  "서울대 경영대 공지",
-  "사람인 HOT100",
-  "네이버 채용",
-  "잡코리아 AI 채용",
-];
+function Sidebar({ sources, onOpenSources }) {
+  const subscribedSources = sources.filter((source) => source.isSubscribed);
 
-function Sidebar() {
   return (
     <aside className="sidebar">
       <nav className="menu">
@@ -21,15 +15,17 @@ function Sidebar() {
       <p className="sideTitle">내 사이트</p>
 
       <div className="siteList">
-        {sites.map((site) => (
-          <button key={site} className="sitePill">
+        {subscribedSources.map((source) => (
+          <button key={source.id} className="sitePill">
             <span className="dot" />
-            {site}
+            {source.displayName}
           </button>
         ))}
       </div>
 
-      <button className="addSite">관심 사이트 관리</button>
+      <button className="addSite" onClick={onOpenSources}>
+        관심 사이트 관리
+      </button>
     </aside>
   );
 }
