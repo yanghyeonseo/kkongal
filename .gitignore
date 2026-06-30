@@ -1,0 +1,89 @@
+# ==========================================
+# 환경 변수 / 비밀 (LLM API 키, DB 접속 정보 등)
+# ==========================================
+.env
+.env.*
+!.env.example
+*.local
+secrets.json
+
+# ==========================================
+# Node / Frontend (React, TypeScript)
+# ==========================================
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# ==========================================
+# Python / Backend (Django)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+sdist/
+wheels/
+
+# 가상환경
+.venv/
+venv/
+env/
+ENV/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+/media/
+/staticfiles/
+/static_root/
+
+# 마이그레이션은 보통 커밋하지만, 협의되지 않았다면 아래 주석 해제
+# */migrations/*.py
+# !*/migrations/__init__.py
+
+# ==========================================
+# Crawler (Playwright)
+# ==========================================
+playwright-report/
+test-results/
+.playwright/
+*.har
+
+# ==========================================
+# 테스트 / 캐시
+# ==========================================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.cache/
+
+# ==========================================
+# 에디터 / OS
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
