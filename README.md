@@ -10,6 +10,7 @@
 
 - **배포 URL**: https://kkongal.cloud
 - **프론트엔드 데모 (Figma)**: https://stung-arrow-75733307.figma.site
+- **데이터 모델 ERD (FigJam)**: https://www.figma.com/board/JGuLClw7NbtdzpWPj89m27/Kkongal-ERD
 - **팀 협업 문서 (Google Docs)**: https://docs.google.com/document/d/1npXftXwNEfNK-Dobz-ccwBmbsrjSprkRXEQQyNBNMSg/edit?usp=sharing
 
 ## 주요 기능
