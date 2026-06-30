@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User
+from .models import Interest, User
 
 
 @admin.register(User)
@@ -56,3 +56,11 @@ class CustomUserAdmin(UserAdmin):
             },
         ),
     )
+
+
+@admin.register(Interest)
+class InterestAdmin(admin.ModelAdmin):
+    list_display = ("id", "user_id", "keyword", "priority", "created_at")
+    list_filter = ("priority", "created_at")
+    search_fields = ("keyword", "description", "user_id__username")
+    ordering = ("-created_at",)
