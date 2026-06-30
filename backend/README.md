@@ -18,7 +18,7 @@ SECRET_KEY='자기 장고 키'
 DEBUG=True
 ```
 
-3.
+3. 가상환경 생성 및 서버 실행
 
 ```
 uv sync
@@ -30,32 +30,34 @@ uv run python manage.py runserver
 
 ## [backend 추가된 폴더 구조]
 
+```text
 backend/
-├─ kkongal/ # Django project 설정
-│ ├─ settings.py # 앱 등록, DB, JWT, CORS 설정
-│ └─ urls.py # 전체 API 라우팅
+├─ kkongal/                  # Django project 설정
+│  ├─ settings.py             # 앱 등록, DB, JWT, CORS 설정
+│  └─ urls.py                 # 전체 API 라우팅
 │
-├─ account/ # 유저/관심사
-│ ├─ models.py # User, Interest
-│ ├─ views.py # signup, signin, refresh, logout, interests API
-│ ├─ serializers.py
-│ └─ urls.py
+├─ account/                  # 유저/관심사
+│  ├─ models.py               # User, Interest
+│  ├─ views.py                # signup, signin, refresh, logout, interests API
+│  ├─ serializers.py
+│  └─ urls.py
 │
-├─ sources/ # 사용자가 등록한 공지 사이트
-│ ├─ models.py # NoticeSource, SourceSubscription
-│ ├─ views.py # subscriptions API
-│ ├─ serializers.py
-│ └─ urls.py
+├─ sources/                  # 사용자가 등록한 공지 사이트
+│  ├─ models.py               # NoticeSource, SourceSubscription
+│  ├─ views.py                # subscriptions API
+│  ├─ serializers.py
+│  └─ urls.py
 │
-├─ notices/ # 공지 원본 및 사용자별 inbox 공지
-│ ├─ models.py # Notice, InboxNotice
-│ ├─ views.py # inbox notice API
-│ ├─ serializers.py
-│ └─ urls.py
+├─ notices/                  # 공지 원본 및 사용자별 inbox 공지
+│  ├─ models.py               # Notice, InboxNotice
+│  ├─ views.py                # inbox notice API
+│  ├─ serializers.py
+│  └─ urls.py
 │
 ├─ manage.py
 ├─ pyproject.toml
 └─ uv.lock
+```
 <br>
 
 ## [프론트엔드용 API]
