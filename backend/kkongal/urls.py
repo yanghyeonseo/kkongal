@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from account.urls import interest_urlpatterns
+from notices.urls import ai_urlpatterns
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -25,6 +26,7 @@ urlpatterns = [
     path('api/interests/', include((interest_urlpatterns, 'interests'))),
     path('api/subscriptions/', include('sources.urls')),
     path('api/notices/', include('notices.urls')),
+    path('api/ai/', include((ai_urlpatterns, 'ai'))),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 

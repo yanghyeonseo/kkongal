@@ -70,6 +70,7 @@ backend/
 - POST /api/account/login/
 - POST /api/account/refresh/
 - POST /api/account/logout/
+- GET /api/account/me
 
 관심사 API
 
@@ -88,6 +89,26 @@ backend/
 
 - GET /api/notices/inbox/
 - GET /api/notices/inbox/{id}/
+- PATCH /api/notices/inbox/{id}/save/
+  <br>
+
+## [AI용 API]
+
+(Swagger에서 자세히 확인 가능(ai 탭): http://127.0.0.1:8000/api/schema/swagger-ui/)
+
+분석할 공지 조회
+
+- GET /api/ai/notices/
+
+공지의 출처 사이트를 구독한 유저와 그 관심사 조회
+
+- GET /api/ai/notices/{notice_id}/candidates/
+
+AI 분석 결과 저장 (inbox_notices로)
+
+- POST /api/ai/inbox-notices/
+
+  <br>
 
 ## [ERD 수정사항]
 

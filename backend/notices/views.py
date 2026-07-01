@@ -1,11 +1,22 @@
+from django.db import transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from .models import InboxNotice
-from .serializers import InboxNoticeSaveSerializer, InboxNoticeSerializer
+from account.models import Interest
+from sources.models import SourceSubscription
+
+from .models import InboxNotice, Notice
+from .serializers import (
+    AiInboxNoticeCreateSerializer,
+    AiNoticeCandidateSerializer,
+    InboxNoticeSaveSerializer,
+    InboxNoticeSerializer,
+    NoticeSerializer,
+)
 
 
 class InboxNoticeListView(APIView):
@@ -108,3 +119,131 @@ class InboxNoticeSaveView(APIView):
 
         response_serializer = InboxNoticeSerializer(inbox_notice)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class AiNoticeListView(APIView):
+    @extend_schema(
+        summary="AI 분석용 공지 목록 조회",
+        description="크롤링되어 저장된 공지 목록을 AI 분석용으로 조회합니다.",
+        parameters=[
+            OpenApiParameter(
+                name="source_id",
+                description="특정 출처 사이트의 공지만 조회합니다.",
+                required=False,
+                type=int,
+            )
+        ],
+        responses={200: NoticeSerializer(many=True)},
+    )
+    def get(self, request):
+        notices = Notice.objects.select_related("source_id").order_by(
+            "-published_at", "-created_at", "-id"
+        )
+
+        source_id = request.query_params.get("source_id")
+        if source_id:
+            notices = notices.filter(source_id_id=source_id)
+
+        serializer = NoticeSerializer(notices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AiNoticeCandidateListView(APIView):
+    @extend_schema(
+        summary="AI 분석용 후보 유저/관심사 조회",
+        description="공지의 출처 사이트를 구독한 사용자와 각 사용자의 관심사를 조회합니다.",
+        responses={
+            200: AiNoticeCandidateSerializer(many=True),
+            404: "Not Found",
+        },
+    )
+    def get(self, request, notice_id):
+        notice = get_object_or_404(Notice, id=notice_id)
+        subscriptions = (
+            SourceSubscription.objects.filter(source_id=notice.source_id)
+            .select_related("user_id")
+            .prefetch_related(
+                Prefetch(
+                    "user_id__interests",
+                    queryset=Interest.objects.order_by("-priority", "-created_at"),
+                )
+            )
+            .order_by("user_id__id")
+        )
+
+        candidates = []
+        for subscription in subscriptions:
+            user = subscription.user_id
+            candidates.append(
+                {
+                    "user_id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "age": user.age,
+                    "job": user.job,
+                    "gender": user.gender,
+                    "interests": [
+                        {
+                            "id": interest.id,
+                            "keyword": interest.keyword,
+                            "description": interest.description,
+                            "priority": interest.priority,
+                        }
+                        for interest in user.interests.all()
+                    ],
+                }
+            )
+
+        serializer = AiNoticeCandidateSerializer(candidates, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AiInboxNoticeCreateView(APIView):
+    @extend_schema(
+        summary="AI 분석 결과 inbox 저장",
+        description="AI가 분석한 사용자별 공지 매칭 결과를 inbox_notice에 생성하거나 업데이트합니다.",
+        request=AiInboxNoticeCreateSerializer,
+        responses={
+            200: InboxNoticeSerializer,
+            201: InboxNoticeSerializer,
+            400: "Bad Request",
+        },
+    )
+    def post(self, request):
+        is_many = isinstance(request.data, list)
+        request_serializer = AiInboxNoticeCreateSerializer(
+            data=request.data, many=is_many
+        )
+        request_serializer.is_valid(raise_exception=True)
+
+        validated_items = (
+            request_serializer.validated_data
+            if is_many
+            else [request_serializer.validated_data]
+        )
+
+        inbox_notices = []
+        created_count = 0
+        with transaction.atomic():
+            for item in validated_items:
+                inbox_notice, created = InboxNotice.objects.update_or_create(
+                    user_id=item["user"],
+                    notice_id=item["notice"],
+                    defaults={
+                        "relevance_score": item["relevance_score"],
+                        "matched_keywords": item["matched_keywords"],
+                        "reason": item["reason"],
+                    },
+                )
+                inbox_notices.append(inbox_notice)
+                if created:
+                    created_count += 1
+
+        response_serializer = InboxNoticeSerializer(inbox_notices, many=True)
+        response_status = (
+            status.HTTP_201_CREATED if created_count > 0 else status.HTTP_200_OK
+        )
+
+        if is_many:
+            return Response(response_serializer.data, status=response_status)
+        return Response(response_serializer.data[0], status=response_status)

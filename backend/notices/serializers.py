@@ -1,8 +1,11 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 
 from sources.serializers import NoticeSourceSerializer
 
 from .models import InboxNotice, Notice
+
+User = get_user_model()
 
 
 class NoticeSerializer(serializers.ModelSerializer):
@@ -50,3 +53,53 @@ class InboxNoticeSerializer(serializers.ModelSerializer):
 
 class InboxNoticeSaveSerializer(serializers.Serializer):
     is_saved = serializers.BooleanField()
+
+
+class AiCandidateInterestSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    keyword = serializers.CharField()
+    description = serializers.CharField(allow_blank=True)
+    priority = serializers.IntegerField()
+
+
+class AiNoticeCandidateSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    username = serializers.CharField()
+    email = serializers.EmailField(allow_blank=True)
+    age = serializers.IntegerField(allow_null=True)
+    job = serializers.CharField(allow_blank=True)
+    gender = serializers.CharField(allow_blank=True)
+    interests = AiCandidateInterestSerializer(many=True)
+
+
+class AiInboxNoticeCreateSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField()
+    notice_id = serializers.IntegerField()
+    relevance_score = serializers.FloatField(required=False, default=0.0)
+    matched_keywords = serializers.JSONField(required=False, default="")
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        try:
+            attrs["user"] = User.objects.get(id=attrs["user_id"])
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError(
+                {"user_id": "User does not exist."}
+            ) from exc
+
+        try:
+            attrs["notice"] = Notice.objects.get(id=attrs["notice_id"])
+        except Notice.DoesNotExist as exc:
+            raise serializers.ValidationError(
+                {"notice_id": "Notice does not exist."}
+            ) from exc
+
+        matched_keywords = attrs.get("matched_keywords", "")
+        if isinstance(matched_keywords, list):
+            attrs["matched_keywords"] = ",".join(str(item) for item in matched_keywords)
+        elif matched_keywords is None:
+            attrs["matched_keywords"] = ""
+        elif not isinstance(matched_keywords, str):
+            attrs["matched_keywords"] = str(matched_keywords)
+
+        return attrs
