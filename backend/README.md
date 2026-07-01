@@ -8,8 +8,7 @@ cd kkongal/backend
 git switch feature/backend_basic
 ```
 
-2. 장고 키 세팅
-   root directory에 .env 파일 생성 후, 키 입력 (https://djecrety.ir/)
+2. 장고 키 세팅: root directory에 .env 파일 생성 후, 키 입력 (https://djecrety.ir/)
 
 ```
 # .env
@@ -58,6 +57,7 @@ backend/
 ├─ pyproject.toml
 └─ uv.lock
 ```
+
 <br>
 
 ## [프론트엔드용 API]

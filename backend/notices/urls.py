@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import InboxNoticeDetailView, InboxNoticeListView
+from .views import InboxNoticeDetailView, InboxNoticeListView, InboxNoticeSaveView
 
 
 app_name = "notices"
@@ -8,4 +8,5 @@ app_name = "notices"
 urlpatterns = [
     path("inbox/", InboxNoticeListView.as_view()),
     path("inbox/<int:inbox_notice_id>/", InboxNoticeDetailView.as_view()),
+    path("inbox/<int:inbox_notice_id>/save/", InboxNoticeSaveView.as_view()),
 ]

@@ -18,6 +18,7 @@ class Notice(models.Model):
     content = models.TextField(blank=True)
     publisher = models.CharField(max_length=128, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    deadline_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -50,6 +51,7 @@ class InboxNotice(models.Model):
     matched_keywords = models.TextField(blank=True)
     reason = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
+    is_saved = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

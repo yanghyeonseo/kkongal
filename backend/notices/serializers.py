@@ -20,6 +20,7 @@ class NoticeSerializer(serializers.ModelSerializer):
             "content",
             "publisher",
             "published_at",
+            "deadline_at",
             "updated_at",
             "created_at",
         )
@@ -28,6 +29,7 @@ class NoticeSerializer(serializers.ModelSerializer):
 
 class InboxNoticeSerializer(serializers.ModelSerializer):
     notice = NoticeSerializer(source="notice_id", read_only=True)
+    deadline_at = serializers.DateTimeField(source="notice_id.deadline_at", read_only=True)
 
     class Meta:
         model = InboxNotice
@@ -36,9 +38,15 @@ class InboxNoticeSerializer(serializers.ModelSerializer):
             "user_id",
             "notice_id",
             "notice",
+            "deadline_at",
             "relevance_score",
             "matched_keywords",
             "reason",
             "is_read",
+            "is_saved",
         )
         read_only_fields = fields
+
+
+class InboxNoticeSaveSerializer(serializers.Serializer):
+    is_saved = serializers.BooleanField()

@@ -3,6 +3,7 @@ from .views import (
     InterestDetailView,
     InterestListView,
     LogoutView,
+    MeView,
     SignInView,
     SignUpView,
     TokenRefreshView,
@@ -14,6 +15,7 @@ urlpatterns = [
     path("signin/", SignInView.as_view()),
     path("refresh/", TokenRefreshView.as_view()),
     path("logout/", LogoutView.as_view()),
+    path("me/", MeView.as_view()),
 ]
 
 interest_urlpatterns = [

@@ -4,7 +4,8 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from account.request_serializers import SignInRequestSerializer, SignUpRequestSerializer, TokenRefreshRequestSerializer, LogoutRequestSerializer
 from .models import Interest
@@ -139,6 +140,31 @@ class LogoutView(APIView):
         res.delete_cookie("access_token")
         res.delete_cookie("refresh_token")
         return res
+
+
+class MeView(APIView):
+    @extend_schema(
+        summary="현재 로그인 유저 조회",
+        description="쿠키의 access_token 기준으로 현재 로그인한 사용자를 조회합니다.",
+        responses={200: UserSerializer, 401: "Unauthorized"},
+    )
+    def get(self, request):
+        access_token = request.COOKIES.get("access_token")
+        if not access_token:
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        try:
+            validated_token = AccessToken(access_token)
+            user = User.objects.get(id=validated_token["user_id"])
+        except (KeyError, TokenError, User.DoesNotExist):
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        serializer = UserSerializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class InterestListView(APIView):
