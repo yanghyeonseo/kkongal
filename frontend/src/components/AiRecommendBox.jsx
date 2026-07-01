@@ -1,4 +1,5 @@
 import { isToday } from "../utils/date.js";
+import { Zap } from "lucide-react";
 
 function AiRecommendBox({ notices, interests }) {
   const recommended = notices
@@ -17,7 +18,9 @@ function AiRecommendBox({ notices, interests }) {
   return (
     <section className="aiBox">
       <div className="aiHeader">
-        <div className="aiIcon">⚡</div>
+        <div className="aiIcon">
+          <Zap size={22} strokeWidth={1.5} />
+        </div>
 
         <div>
           <p>AI 추천</p>

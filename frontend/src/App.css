@@ -276,17 +276,17 @@ button:disabled {
 }
 
 .sidebar {
-  width: 312px;
-  min-width: 312px;
-  max-width: 312px;
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
   height: 100%;
-  padding: 20px 20px 18px;
+  padding: 16px 16px 14px;
 
   display: flex;
   flex-direction: column;
 
   border: 1px solid #dfe7f1;
-  border-radius: 28px;
+  border-radius: 26px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 18px 48px rgba(51, 85, 130, 0.1);
 
@@ -305,7 +305,7 @@ button:disabled {
 
 .main::-webkit-scrollbar,
 .siteList::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 .main::-webkit-scrollbar-thumb,
@@ -326,26 +326,26 @@ button:disabled {
 .menu {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .menuItem {
   width: 100%;
-  height: 48px;
-  padding: 0 16px;
+  height: 42px;
+  padding: 0 14px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
 
   border: 0;
-  border-radius: 18px;
+  border-radius: 16px;
   background: transparent;
   color: #20242b;
 
-  font-size: 15px;
-  font-weight: 900;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .menuItem.active {
@@ -356,17 +356,21 @@ button:disabled {
 .menuLeft {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
+  min-width: 0;
 }
 
 .menuIcon {
+  width: 17px;
+  height: 17px;
   stroke-width: 2.2;
+  flex-shrink: 0;
 }
 
 .menuBadge {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
 
   display: inline-flex;
   align-items: center;
@@ -377,7 +381,8 @@ button:disabled {
   color: white;
 
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .menuItem.active .menuBadge {
@@ -386,44 +391,47 @@ button:disabled {
 
 .divider {
   height: 1px;
-  margin: 22px 0 18px;
+  margin: 16px 0 13px;
   background: #e8edf4;
   flex-shrink: 0;
 }
 
 .sideTitle {
-  margin: 0 0 12px;
+  margin: 0 0 9px;
+  padding: 0 4px;
   color: #98a2b3;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
 .siteList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 
   overflow-y: auto;
   min-height: 0;
-  padding-right: 6px;
+  padding-right: 5px;
+  flex: 1;
 }
 
 .sitePill {
   width: 100%;
-  min-height: 44px;
-  padding: 0 14px;
+  min-height: 36px;
+  padding: 0 12px;
 
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 
   border: 0;
-  border-radius: 16px;
+  border-radius: 14px;
 
-  font-size: 14px;
-  font-weight: 900;
+  font-size: 13px;
+  font-weight: 700;
   text-align: left;
+  line-height: 1.2;
   transition:
     background 0.2s ease,
     color 0.2s ease,
@@ -442,8 +450,8 @@ button:disabled {
 }
 
 .dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -457,17 +465,17 @@ button:disabled {
 }
 
 .addSite {
-  margin-top: 14px;
+  margin-top: 10px;
   width: 100%;
-  height: 44px;
+  height: 38px;
 
   border: 0;
-  border-radius: 14px;
+  border-radius: 13px;
   background: transparent;
   color: #1677f2;
 
-  font-size: 15px;
-  font-weight: 900;
+  font-size: 14px;
+  font-weight: 800;
   flex-shrink: 0;
 }
 
@@ -1530,11 +1538,11 @@ button:disabled {
     padding-right: 22px;
   }
 }
+
 /* =========================
    폰트 두께 / 로고 정렬 최종 조정
    ========================= */
 
-/* 전체적으로 너무 두꺼운 느낌 줄이기 */
 .brand strong,
 .menuItem,
 .sitePill,
@@ -1556,14 +1564,12 @@ button:disabled {
   font-weight: 700;
 }
 
-/* 중요한 제목만 살짝 두껍게 */
 .noticeTitleRow h2,
 .aiHeader h2,
 .noticeTitleButton {
   font-weight: 800;
 }
 
-/* 공지 로고 원 안 글자 정확히 가운데 정렬 */
 .noticeLogo {
   display: flex;
   align-items: center;
@@ -1576,12 +1582,10 @@ button:disabled {
   font-weight: 800;
 }
 
-/* 로고 안 글자가 위아래로 흔들리지 않게 */
 .noticeLogo::first-letter {
   line-height: 1;
 }
 
-/* 공지 카드 텍스트도 조금 부드럽게 */
 .noticeContent p {
   color: #9aa3b2;
   font-size: 13px;
@@ -1600,7 +1604,6 @@ button:disabled {
   font-weight: 500;
 }
 
-/* 오른쪽 태그들도 살짝 덜 무겁게 */
 .aiMatchBadge,
 .newBadge,
 .deadlineBadge,
@@ -1609,12 +1612,10 @@ button:disabled {
   font-weight: 700;
 }
 
-/* 시간 텍스트도 얇게 */
 .noticeTime {
   font-weight: 500;
 }
 
-/* 사이드바 메뉴도 너무 두껍지 않게 */
 .menuItem {
   font-weight: 700;
 }
@@ -1627,7 +1628,6 @@ button:disabled {
   font-weight: 700;
 }
 
-/* AI 추천 박스 내부도 조금 정돈 */
 .aiHeader p {
   font-weight: 700;
 }
@@ -1644,7 +1644,6 @@ button:disabled {
   font-weight: 500;
 }
 
-/* 헤더 글씨도 조금 자연스럽게 */
 .brand strong {
   font-weight: 800;
 }
@@ -1747,7 +1746,6 @@ button:disabled {
   line-height: 1.35;
 }
 
-/* 오른쪽 메타영역 */
 .noticeMeta {
   max-width: 430px;
 
@@ -1760,7 +1758,6 @@ button:disabled {
   flex-shrink: 0;
 }
 
-/* 태그들 위로 떠보이는 문제 보정 */
 .aiMatchBadge,
 .newBadge,
 .deadlineBadge,
@@ -1783,7 +1780,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* AI 매치 */
 .aiMatchBadge {
   border: 1px solid #d8d2ff;
   background: #f5f2ff;
@@ -1795,14 +1791,12 @@ button:disabled {
   color: #5b4df6;
 }
 
-/* NEW */
 .newBadge {
   border: 0;
   background: #ff4033;
   color: white;
 }
 
-/* 마감임박 */
 .deadlineGroup {
   display: inline-flex;
   align-items: center;
@@ -1821,7 +1815,6 @@ button:disabled {
   padding: 0 10px;
 }
 
-/* 시간 */
 .noticeTime {
   display: inline-flex;
   align-items: center;
@@ -1834,7 +1827,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* 번개 아이콘 */
 .aiReasonIcon {
   width: 28px;
   height: 28px;
@@ -1860,7 +1852,6 @@ button:disabled {
   transform: rotate(180deg);
 }
 
-/* 저장 버튼 */
 .saveIconButton {
   width: 30px;
   height: 30px;
@@ -1881,7 +1872,6 @@ button:disabled {
   color: #d9a000;
 }
 
-/* AI 이유 펼쳤을 때 */
 .aiReasonBox {
   margin-top: 14px;
   padding: 16px 18px;

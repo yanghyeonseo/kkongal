@@ -18,6 +18,20 @@ function parseMatchedKeywords(value) {
   return [];
 }
 
+function getIsDeadlineSoon(deadlineAt) {
+  if (!deadlineAt) return false;
+
+  const today = new Date();
+  const deadline = new Date(deadlineAt);
+
+  today.setHours(0, 0, 0, 0);
+  deadline.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+
+  return diffDays >= 0 && diffDays <= 7;
+}
+
 function normalizeInboxNotice(item) {
   const notice = item.notice || {};
   const source = notice.source || {};
@@ -48,7 +62,7 @@ function normalizeInboxNotice(item) {
 
     isRead: item.is_read ?? false,
     isSaved: item.is_saved ?? false,
-    isDeadlineSoon: Boolean(deadlineAt),
+    isDeadlineSoon: getIsDeadlineSoon(deadlineAt),
   };
 }
 

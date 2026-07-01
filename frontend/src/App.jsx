@@ -29,8 +29,6 @@ const VIEW_TITLES = {
 
 const CATEGORY_FILTERS = [
   { id: "all", label: "전체" },
-  { id: "job", label: "채용" },
-  { id: "school", label: "학사" },
   { id: "deadline", label: "마감임박" },
 ];
 
@@ -212,14 +210,6 @@ function App() {
 
       if (selectedView === "saved") {
         if (!notice.isSaved) return false;
-      }
-
-      if (selectedCategory === "job") {
-        if (notice.category !== "job") return false;
-      }
-
-      if (selectedCategory === "school") {
-        if (notice.category !== "school") return false;
       }
 
       if (selectedCategory === "deadline") {

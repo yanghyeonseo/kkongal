@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Bell, Search, Plus } from "lucide-react";
 
 function Header({
   currentUser,
@@ -24,7 +25,9 @@ function Header({
   return (
     <header className="header">
       <div className="brand">
-        <div className="brandIcon">🔔</div>
+        <div className="brandIcon">
+          <Bell size={21} strokeWidth={2.4} />
+        </div>
         <strong>맞춤 공지 알리미</strong>
       </div>
 
