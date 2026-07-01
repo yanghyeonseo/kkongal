@@ -1,5 +1,29 @@
 import { useState } from "react";
+import { Zap, Bookmark } from "lucide-react";
 import { formatRelativeTime, isToday, calculateDday } from "../utils/date.js";
+
+const LOGO_COLORS = [
+  "#1677f2",
+  "#ef2b55",
+  "#ff6b2c",
+  "#4f46e5",
+  "#0ea5e9",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+];
+
+function getLogoColor(sourceName) {
+  if (!sourceName) return LOGO_COLORS[0];
+
+  let hash = 0;
+
+  for (let i = 0; i < sourceName.length; i += 1) {
+    hash += sourceName.charCodeAt(i);
+  }
+
+  return LOGO_COLORS[hash % LOGO_COLORS.length];
+}
 
 function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
   const [isAiReasonOpen, setIsAiReasonOpen] = useState(false);
@@ -28,7 +52,14 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
       }`}
     >
       <div className="noticeTop">
-        <div className="noticeLogo">{notice.sourceDisplayName.slice(0, 1)}</div>
+        <div
+          className="noticeLogo"
+          style={{
+            backgroundColor: getLogoColor(notice.sourceDisplayName),
+          }}
+        >
+          {notice.sourceDisplayName.slice(0, 1)}
+        </div>
 
         <div className="noticeContent">
           <p>{notice.sourceDisplayName}</p>
@@ -49,7 +80,8 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
               className={`aiMatchBadge ${isAiReasonOpen ? "active" : ""}`}
               onClick={handleToggleAiReason}
             >
-              ⚡ AI 매치
+              <Zap size={12} />
+              AI 매치
             </button>
           )}
 
@@ -76,7 +108,7 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
               className={`aiReasonIcon ${isAiReasonOpen ? "active" : ""}`}
               aria-hidden="true"
             >
-              ⚡
+              <Zap size={14} />
             </span>
           )}
 
@@ -85,14 +117,20 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
             onClick={handleToggleSave}
             aria-label="공지 저장"
           >
-            {notice.isSaved ? "★" : "☆"}
+            <Bookmark
+              size={15}
+              fill={notice.isSaved ? "currentColor" : "none"}
+            />
           </button>
         </div>
       </div>
 
       {isAiMatched && isAiReasonOpen && (
         <div className="aiReasonBox">
-          <p className="aiReasonTitle">⚡ AI 선별 이유</p>
+          <p className="aiReasonTitle">
+            <Zap size={14} />
+            AI 선별 이유
+          </p>
 
           <p className="aiReasonText">
             {notice.reason ||

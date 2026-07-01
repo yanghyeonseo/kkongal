@@ -1,124 +1,107 @@
-import { useEffect, useState } from "react";
-import Header from "./components/Header";
-import Sidebar from "./components/Sidebar";
-import AiRecommendBox from "./components/AiRecommendBox";
-import NoticeCard from "./components/NoticeCard";
-import SiteRegisterModal from "./components/SiteRegisterModal";
-import InterestSettingModal from "./components/InterestSettingModal";
-import AuthModal from "./components/AuthModal";
-import { getMyInboxNotices } from "./api/inboxApi.js";
+import { useEffect, useMemo, useState } from "react";
+import "./App.css";
+
+import Header from "./components/Header.jsx";
+import Sidebar from "./components/Sidebar.jsx";
+import AiRecommendBox from "./components/AiRecommendBox.jsx";
+import NoticeCard from "./components/NoticeCard.jsx";
+import SiteRegisterModal from "./components/SiteRegisterModal.jsx";
+import InterestSettingModal from "./components/InterestSettingModal.jsx";
+import AuthModal from "./components/AuthModal.jsx";
+
+import { getMyInboxNotices, toggleInboxNoticeSave } from "./api/inboxApi.js";
 import { getNoticeSources } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import {
-  clearStoredUser,
   getStoredUser,
-  logout,
   saveStoredUser,
+  clearStoredUser,
+  logout,
 } from "./api/authApi.js";
-import { isToday } from "./utils/date.js";
-import "./App.css";
 
-const MAIN_FILTERS = [
-  {
-    label: "전체",
-    value: "all",
-  },
-  {
-    label: "채용",
-    value: "job",
-  },
-  {
-    label: "학사",
-    value: "school",
-  },
-  {
-    label: "마감임박",
-    value: "deadline",
-  },
-];
+import { isToday } from "./utils/date.js";
 
 const VIEW_TITLES = {
   all: "오늘 새 공지",
   ai: "AI 추천 공지",
-  unread: "안 읽은 공지",
   saved: "저장한 공지",
 };
 
+const CATEGORY_FILTERS = [
+  { id: "all", label: "전체" },
+  { id: "job", label: "채용" },
+  { id: "school", label: "학사" },
+  { id: "deadline", label: "마감임박" },
+];
+
+const MOCK_USER = {
+  id: 1,
+  name: "김현서",
+  username: "김현서",
+  email: "test@example.com",
+};
+
 function App() {
-  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
+  const [currentUser, setCurrentUser] = useState(() => {
+    return getStoredUser() || MOCK_USER;
+  });
 
   const [notices, setNotices] = useState([]);
   const [sources, setSources] = useState([]);
   const [interests, setInterests] = useState([]);
 
+  const [selectedView, setSelectedView] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState("all");
   const [activeSourceIds, setActiveSourceIds] = useState([]);
 
-  const [loading, setLoading] = useState(Boolean(currentUser));
-
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState("login");
-
   const [isSiteRegisterOpen, setIsSiteRegisterOpen] = useState(false);
-  const [isInterestModalOpen, setIsInterestModalOpen] = useState(false);
-
-  const [selectedView, setSelectedView] = useState("all");
-  const [selectedMainFilter, setSelectedMainFilter] = useState("all");
+  const [isInterestSettingOpen, setIsInterestSettingOpen] = useState(false);
+  const [authMode, setAuthMode] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const noticesPerPage = 5;
 
   useEffect(() => {
-    if (!currentUser) {
-      setNotices([]);
-      setSources([]);
-      setInterests([]);
-      setActiveSourceIds([]);
-      setLoading(false);
-      return;
-    }
+    if (!currentUser) return;
 
-    async function loadInitialData() {
-      setLoading(true);
-
+    const loadDashboardData = async () => {
       try {
-        const [noticeData, sourceData, interestData] = await Promise.all([
+        const [nextNotices, nextSources, nextInterests] = await Promise.all([
           getMyInboxNotices(),
           getNoticeSources(),
           getMyInterests(),
         ]);
 
-        setNotices(noticeData);
-        setSources(sourceData);
-        setInterests(interestData);
+        setNotices(nextNotices);
+        setSources(nextSources);
+        setInterests(nextInterests);
 
-        setActiveSourceIds(
-          sourceData
-            .filter((source) => source.isSubscribed)
-            .map((source) => source.id),
-        );
+        const subscribedSourceIds = nextSources
+          .filter((source) => source.isSubscribed)
+          .map((source) => source.id);
+
+        setActiveSourceIds(subscribedSourceIds);
       } catch (error) {
         console.error(error);
-      } finally {
-        setLoading(false);
+        alert("대시보드 데이터를 불러오지 못했어요.");
       }
-    }
+    };
 
-    loadInitialData();
+    loadDashboardData();
   }, [currentUser]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedView, selectedMainFilter, activeSourceIds]);
+  }, [selectedView, selectedCategory, activeSourceIds]);
 
   const handleOpenAuth = (mode) => {
     setAuthMode(mode);
-    setIsAuthModalOpen(true);
   };
 
   const handleAuthSuccess = (user) => {
     saveStoredUser(user);
     setCurrentUser(user);
-    setIsAuthModalOpen(false);
+    setAuthMode(null);
   };
 
   const handleLogout = async () => {
@@ -128,21 +111,31 @@ function App() {
       console.error(error);
     } finally {
       clearStoredUser();
-      setCurrentUser(null);
-      setSelectedView("all");
-      setSelectedMainFilter("all");
-      setCurrentPage(1);
+
+      // 지금은 테스트를 편하게 하기 위해 로그아웃 후에도 mock 로그인 상태 유지
+      setCurrentUser(MOCK_USER);
+      saveStoredUser(MOCK_USER);
+
+      // 실제 로그아웃 화면을 보고 싶으면 위 2줄 대신 아래 코드 사용
+      // setCurrentUser(null);
     }
   };
 
+  const handleToggleSource = (sourceId) => {
+    setActiveSourceIds((prev) => {
+      if (prev.includes(sourceId)) {
+        return prev.filter((id) => id !== sourceId);
+      }
+
+      return [...prev, sourceId];
+    });
+  };
+
   const handleOpenNotice = (notice) => {
-    setNotices((prevNotices) =>
-      prevNotices.map((item) =>
+    setNotices((prev) =>
+      prev.map((item) =>
         item.inboxNoticeId === notice.inboxNoticeId
-          ? {
-              ...item,
-              isRead: true,
-            }
+          ? { ...item, isRead: true }
           : item,
       ),
     );
@@ -150,128 +143,102 @@ function App() {
     window.open(notice.url, "_blank", "noopener,noreferrer");
   };
 
-  const handleToggleSave = (inboxNoticeId) => {
-    setNotices((prevNotices) =>
-      prevNotices.map((notice) =>
+  const handleToggleSave = async (inboxNoticeId) => {
+    const targetNotice = notices.find(
+      (notice) => notice.inboxNoticeId === inboxNoticeId,
+    );
+
+    if (!targetNotice) return;
+
+    const nextIsSaved = !targetNotice.isSaved;
+
+    setNotices((prev) =>
+      prev.map((notice) =>
         notice.inboxNoticeId === inboxNoticeId
-          ? {
-              ...notice,
-              isSaved: !notice.isSaved,
-            }
+          ? { ...notice, isSaved: nextIsSaved }
           : notice,
       ),
     );
+
+    try {
+      await toggleInboxNoticeSave(inboxNoticeId, nextIsSaved);
+    } catch (error) {
+      console.error(error);
+
+      setNotices((prev) =>
+        prev.map((notice) =>
+          notice.inboxNoticeId === inboxNoticeId
+            ? { ...notice, isSaved: !nextIsSaved }
+            : notice,
+        ),
+      );
+
+      alert("저장 상태 변경에 실패했어요.");
+    }
   };
 
-  const handleToggleSource = (sourceId) => {
-    setActiveSourceIds((prevSourceIds) => {
-      if (prevSourceIds.includes(sourceId)) {
-        return prevSourceIds.filter((id) => id !== sourceId);
+  const handleSaveInterests = (nextInterests) => {
+    setInterests(nextInterests);
+  };
+
+  const sourceFilteredNotices = useMemo(() => {
+    return notices.filter((notice) => {
+      if (activeSourceIds.length === 0) return false;
+      return activeSourceIds.includes(notice.sourceId);
+    });
+  }, [notices, activeSourceIds]);
+
+  const aiCount = useMemo(() => {
+    return sourceFilteredNotices.filter(
+      (notice) =>
+        notice.relevanceScore >= 0.8 || notice.matchedInterestTags?.length > 0,
+    ).length;
+  }, [sourceFilteredNotices]);
+
+  const todayNoticeCount = useMemo(() => {
+    return sourceFilteredNotices.filter((notice) => isToday(notice.publishedAt))
+      .length;
+  }, [sourceFilteredNotices]);
+
+  const filteredNotices = useMemo(() => {
+    return sourceFilteredNotices.filter((notice) => {
+      if (selectedView === "ai") {
+        const isAiMatched =
+          notice.relevanceScore >= 0.8 ||
+          notice.matchedInterestTags?.length > 0;
+
+        if (!isAiMatched) return false;
       }
 
-      return [...prevSourceIds, sourceId];
-    });
-  };
+      if (selectedView === "saved") {
+        if (!notice.isSaved) return false;
+      }
 
-  if (!currentUser) {
-    return (
-      <div className="app">
-        <Header
-          currentUser={null}
-          onOpenAuth={handleOpenAuth}
-          onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
-          onOpenInterestSetting={() => setIsInterestModalOpen(true)}
-          onLogout={handleLogout}
-        />
+      if (selectedCategory === "job") {
+        if (notice.category !== "job") return false;
+      }
 
-        <div className="authGate">
-          <div className="authRequiredBox">
-            <strong>로그인을 진행해주세요</strong>
-          </div>
-        </div>
+      if (selectedCategory === "school") {
+        if (notice.category !== "school") return false;
+      }
 
-        {isAuthModalOpen && (
-          <AuthModal
-            initialMode={authMode}
-            onClose={() => setIsAuthModalOpen(false)}
-            onAuthSuccess={handleAuthSuccess}
-          />
-        )}
-      </div>
-    );
-  }
+      if (selectedCategory === "deadline") {
+        if (!notice.isDeadlineSoon) return false;
+      }
 
-  const activeSources = sources.filter((source) =>
-    activeSourceIds.includes(source.id),
-  );
-
-  const sourceFilteredNotices = notices.filter((notice) => {
-    if (activeSourceIds.length === 0) {
-      return false;
-    }
-
-    return activeSources.some(
-      (source) =>
-        source.id === notice.sourceId ||
-        source.name === notice.sourceName ||
-        source.displayName === notice.sourceDisplayName,
-    );
-  });
-
-  const isAiMatched = (notice) =>
-    notice.relevanceScore >= 0.8 || notice.matchedInterestTags?.length > 0;
-
-  const aiCount = sourceFilteredNotices.filter(isAiMatched).length;
-
-  const unreadCount = sourceFilteredNotices.filter(
-    (notice) => !notice.isRead,
-  ).length;
-
-  const viewFilteredNotices = sourceFilteredNotices.filter((notice) => {
-    if (selectedView === "ai") {
-      return isAiMatched(notice);
-    }
-
-    if (selectedView === "unread") {
-      return !notice.isRead;
-    }
-
-    if (selectedView === "saved") {
-      return notice.isSaved;
-    }
-
-    return true;
-  });
-
-  const filteredNotices = viewFilteredNotices.filter((notice) => {
-    if (selectedMainFilter === "all") {
       return true;
-    }
+    });
+  }, [sourceFilteredNotices, selectedView, selectedCategory]);
 
-    if (selectedMainFilter === "deadline") {
-      return notice.isDeadlineSoon;
-    }
+  const totalPages = Math.ceil(filteredNotices.length / noticesPerPage);
+  const safeTotalPages = totalPages === 0 ? 1 : totalPages;
 
-    return notice.category === selectedMainFilter;
-  });
+  const paginatedNotices = useMemo(() => {
+    const startIndex = (currentPage - 1) * noticesPerPage;
+    const endIndex = startIndex + noticesPerPage;
 
-  const todayNewCount = filteredNotices.filter((notice) =>
-    isToday(notice.publishedAt),
-  ).length;
-
-  const sectionCount =
-    selectedView === "all" ? todayNewCount : filteredNotices.length;
-
-  const sortedNotices = [...filteredNotices].sort(
-    (a, b) => new Date(b.publishedAt) - new Date(a.publishedAt),
-  );
-
-  const totalPages = Math.ceil(sortedNotices.length / noticesPerPage);
-
-  const startIndex = (currentPage - 1) * noticesPerPage;
-  const endIndex = startIndex + noticesPerPage;
-
-  const pagedNotices = sortedNotices.slice(startIndex, endIndex);
+    return filteredNotices.slice(startIndex, endIndex);
+  }, [filteredNotices, currentPage]);
 
   return (
     <div className="app">
@@ -279,21 +246,24 @@ function App() {
         currentUser={currentUser}
         onOpenAuth={handleOpenAuth}
         onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
-        onOpenInterestSetting={() => setIsInterestModalOpen(true)}
+        onOpenInterestSetting={() => setIsInterestSettingOpen(true)}
         onLogout={handleLogout}
       />
 
-      {loading ? (
-        <div className="loading">공지 목록을 불러오는 중...</div>
+      {!currentUser ? (
+        <main className="authGate">
+          <div className="authRequiredBox">
+            <strong>로그인을 진행해주세요</strong>
+          </div>
+        </main>
       ) : (
-        <div className="layout">
+        <div className="dashboard">
           <Sidebar
             sources={sources}
             selectedView={selectedView}
             onChangeView={setSelectedView}
             onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
             aiCount={aiCount}
-            unreadCount={unreadCount}
             activeSourceIds={activeSourceIds}
             onToggleSource={handleToggleSource}
           />
@@ -306,60 +276,69 @@ function App() {
 
             <section className="noticeSection">
               <div className="noticeTitleRow">
-                <h2>
-                  {VIEW_TITLES[selectedView]} <span>{sectionCount}건</span>
-                </h2>
+                <div>
+                  <p className="sectionEyebrow">맞춤 공지함</p>
+
+                  <h2>
+                    {VIEW_TITLES[selectedView]}{" "}
+                    <span>
+                      {selectedView === "all"
+                        ? todayNoticeCount
+                        : filteredNotices.length}
+                    </span>
+                    건
+                  </h2>
+                </div>
 
                 <div className="filterButtons">
-                  {MAIN_FILTERS.map((filter) => (
+                  {CATEGORY_FILTERS.map((category) => (
                     <button
-                      key={filter.value}
+                      key={category.id}
                       className={
-                        selectedMainFilter === filter.value ? "active" : ""
+                        selectedCategory === category.id ? "active" : ""
                       }
-                      onClick={() => setSelectedMainFilter(filter.value)}
+                      onClick={() => setSelectedCategory(category.id)}
                     >
-                      {filter.label}
+                      {category.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {filteredNotices.length === 0 ? (
-                <div className="emptyNotice">
-                  <strong>아직 해당 조건의 공지가 없어요.</strong>
-                  <p>다른 필터를 선택하거나 사이트를 추가해보세요.</p>
-                </div>
-              ) : (
-                <div className="noticeList">
-                  {pagedNotices.map((notice) => (
+              <div className="noticeList">
+                {paginatedNotices.length === 0 ? (
+                  <div className="emptyNoticeBox">
+                    조건에 맞는 공지가 아직 없어요.
+                  </div>
+                ) : (
+                  paginatedNotices.map((notice) => (
                     <NoticeCard
                       key={notice.inboxNoticeId}
                       notice={notice}
                       onOpenNotice={handleOpenNotice}
                       onToggleSave={handleToggleSave}
                     />
-                  ))}
+                  ))
+                )}
+              </div>
 
-                  {totalPages > 1 && (
-                    <div className="pagination">
-                      {Array.from({ length: totalPages }, (_, index) => {
-                        const pageNumber = index + 1;
+              {filteredNotices.length > noticesPerPage && (
+                <div className="pagination">
+                  {Array.from({ length: safeTotalPages }, (_, index) => {
+                    const pageNumber = index + 1;
 
-                        return (
-                          <button
-                            key={pageNumber}
-                            className={`pageButton ${
-                              currentPage === pageNumber ? "active" : ""
-                            }`}
-                            onClick={() => setCurrentPage(pageNumber)}
-                          >
-                            {pageNumber}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                    return (
+                      <button
+                        key={pageNumber}
+                        className={`pageButton ${
+                          currentPage === pageNumber ? "active" : ""
+                        }`}
+                        onClick={() => setCurrentPage(pageNumber)}
+                      >
+                        {pageNumber}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -367,23 +346,23 @@ function App() {
         </div>
       )}
 
-      {isAuthModalOpen && (
-        <AuthModal
-          initialMode={authMode}
-          onClose={() => setIsAuthModalOpen(false)}
-          onAuthSuccess={handleAuthSuccess}
-        />
-      )}
-
       {isSiteRegisterOpen && (
         <SiteRegisterModal onClose={() => setIsSiteRegisterOpen(false)} />
       )}
 
-      {isInterestModalOpen && (
+      {isInterestSettingOpen && (
         <InterestSettingModal
           interests={interests}
-          onClose={() => setIsInterestModalOpen(false)}
-          onSave={setInterests}
+          onClose={() => setIsInterestSettingOpen(false)}
+          onSave={handleSaveInterests}
+        />
+      )}
+
+      {authMode && (
+        <AuthModal
+          initialMode={authMode}
+          onClose={() => setAuthMode(null)}
+          onAuthSuccess={handleAuthSuccess}
         />
       )}
     </div>

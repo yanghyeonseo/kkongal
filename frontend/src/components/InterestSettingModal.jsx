@@ -44,9 +44,15 @@ function InterestSettingModal({ interests, onClose, onSave }) {
   };
 
   const handleSave = async () => {
-    const savedInterests = await updateMyInterests(localInterests);
-    onSave(savedInterests);
-    onClose();
+    try {
+      const savedInterests = await updateMyInterests(localInterests);
+
+      onSave(savedInterests);
+      onClose();
+    } catch (error) {
+      console.error(error);
+      alert("관심사 저장에 실패했어요.");
+    }
   };
 
   return (

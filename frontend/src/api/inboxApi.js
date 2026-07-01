@@ -1,69 +1,86 @@
 import { apiRequest } from "./client.js";
+import { mockInboxNotices } from "../data/mockInboxNotices.js";
+
+const USE_MOCK = true;
+
+function parseMatchedKeywords(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
 
 function normalizeInboxNotice(item) {
-  const notice = item.notice || item;
-  const source = item.source || notice.source || {};
+  const notice = item.notice || {};
+  const source = notice.source || {};
+
+  const deadlineAt = item.deadline_at ?? notice.deadline_at ?? null;
 
   return {
-    inboxNoticeId: item.id ?? item.inbox_notice_id ?? item.inboxNoticeId,
-    noticeId: item.notice_id ?? notice.id ?? item.noticeId,
+    inboxNoticeId: item.id,
+    noticeId: item.notice_id ?? notice.id,
 
-    sourceId: item.source_id ?? source.id ?? item.sourceId,
-    sourceName: item.source_name ?? source.name ?? item.sourceName ?? "",
-    sourceDisplayName:
-      item.source_display_name ??
-      source.display_name ??
-      source.name ??
-      item.sourceDisplayName ??
-      "공지 사이트",
+    sourceId: notice.source_id ?? source.id,
+    sourceName: source.name ?? "",
+    sourceDisplayName: source.name ?? "공지 사이트",
 
-    category:
-      item.category ??
-      source.category ??
-      source.source_type ??
-      item.sourceType ??
-      "etc",
+    category: "etc",
 
-    title: item.title ?? notice.title ?? "",
-    description:
-      item.description ??
-      item.content_summary ??
-      notice.description ??
-      notice.content?.slice(0, 80) ??
-      "",
-    url: item.url ?? notice.url ?? "",
+    title: notice.title ?? "",
+    description: notice.content?.slice(0, 80) ?? "",
+    url: notice.url ?? "",
 
-    publishedAt:
-      item.published_at ??
-      notice.published_at ??
-      item.publishedAt ??
-      notice.publishedAt,
+    publishedAt: notice.published_at ?? null,
+    deadlineAt,
 
-    deadlineAt:
-      item.deadline_at ??
-      notice.deadline_at ??
-      item.deadlineAt ??
-      notice.deadlineAt ??
-      null,
-
-    relevanceScore: Number(item.relevance_score ?? item.relevanceScore ?? 0),
-
-    matchedInterestTags:
-      item.matched_interest_tags ??
-      item.matched_keywords ??
-      item.matchedInterestTags ??
-      item.matchedKeywords ??
-      [],
+    relevanceScore: Number(item.relevance_score ?? 0),
+    matchedInterestTags: parseMatchedKeywords(item.matched_keywords),
 
     reason: item.reason ?? "",
 
-    isRead: item.is_read ?? item.isRead ?? false,
-    isSaved: item.is_saved ?? item.isSaved ?? false,
-    isDeadlineSoon: item.is_deadline_soon ?? item.isDeadlineSoon ?? false,
+    isRead: item.is_read ?? false,
+    isSaved: item.is_saved ?? false,
+    isDeadlineSoon: Boolean(deadlineAt),
   };
 }
 
-export async function getMyInboxNotices() {
-  const data = await apiRequest("/api/notices/inbox/");
+export async function getMyInboxNotices({ saved = false } = {}) {
+  if (USE_MOCK) {
+    if (saved) {
+      return mockInboxNotices.filter((notice) => notice.isSaved);
+    }
+
+    return mockInboxNotices;
+  }
+
+  const query = saved ? "?saved=true" : "";
+  const data = await apiRequest(`/api/notices/inbox/${query}`);
+
   return data.map(normalizeInboxNotice);
+}
+
+export async function toggleInboxNoticeSave(inboxNoticeId, isSaved) {
+  if (USE_MOCK) {
+    return {
+      id: inboxNoticeId,
+      is_saved: isSaved,
+    };
+  }
+
+  const data = await apiRequest(`/api/notices/inbox/${inboxNoticeId}/save/`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      is_saved: isSaved,
+    }),
+  });
+
+  return normalizeInboxNotice(data);
 }

@@ -1,60 +1,40 @@
-import { apiRequest } from "./client.js";
+import { mockInterests } from "../data/mockInterests.js";
 
-function normalizeInterest(item) {
-  return {
-    id: item.id,
-    keyword: item.keyword,
-    description: item.description ?? "",
-    priority: item.priority ?? 3,
-  };
-}
+const USE_MOCK = true;
 
 export async function getMyInterests() {
-  const data = await apiRequest("/api/interests/");
-  return data.map(normalizeInterest);
-}
+  if (USE_MOCK) {
+    return mockInterests;
+  }
 
-export async function createInterest(keyword) {
-  const data = await apiRequest("/api/interests/", {
-    method: "POST",
-    body: JSON.stringify({
-      keyword,
-    }),
+  const response = await fetch("http://127.0.0.1:8000/api/interests/", {
+    credentials: "include",
   });
 
-  return normalizeInterest(data);
+  if (!response.ok) {
+    throw new Error("관심사 목록을 불러오지 못했습니다.");
+  }
+
+  return response.json();
 }
 
-export async function deleteInterest(id) {
-  await apiRequest(`/api/interests/${id}/`, {
-    method: "DELETE",
+export async function updateMyInterests(interests) {
+  if (USE_MOCK) {
+    return interests;
+  }
+
+  const response = await fetch("http://127.0.0.1:8000/api/interests/", {
+    method: "PUT",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ interests }),
   });
-}
 
-export async function updateMyInterests(nextInterests) {
-  const currentInterests = await getMyInterests();
+  if (!response.ok) {
+    throw new Error("관심사 저장에 실패했습니다.");
+  }
 
-  const nextKeywords = nextInterests
-    .map((interest) => interest.keyword.trim())
-    .filter(Boolean);
-
-  const uniqueNextKeywords = [...new Set(nextKeywords)];
-
-  const currentKeywords = currentInterests.map((interest) => interest.keyword);
-
-  const interestsToDelete = currentInterests.filter(
-    (interest) => !uniqueNextKeywords.includes(interest.keyword),
-  );
-
-  const keywordsToCreate = uniqueNextKeywords.filter(
-    (keyword) => !currentKeywords.includes(keyword),
-  );
-
-  await Promise.all(
-    interestsToDelete.map((interest) => deleteInterest(interest.id)),
-  );
-
-  await Promise.all(keywordsToCreate.map((keyword) => createInterest(keyword)));
-
-  return getMyInterests();
+  return response.json();
 }

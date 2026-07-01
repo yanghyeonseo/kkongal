@@ -1,10 +1,11 @@
+import { Globe, Sparkles, Bookmark } from "lucide-react";
+
 function Sidebar({
   sources,
   selectedView,
   onChangeView,
   onOpenSiteRegister,
   aiCount,
-  unreadCount,
   activeSourceIds,
   onToggleSource,
 }) {
@@ -17,30 +18,32 @@ function Sidebar({
           className={`menuItem ${selectedView === "all" ? "active" : ""}`}
           onClick={() => onChangeView("all")}
         >
-          <span>🌐 전체</span>
+          <span className="menuLeft">
+            <Globe size={18} className="menuIcon" />
+            전체
+          </span>
         </button>
 
         <button
           className={`menuItem ${selectedView === "ai" ? "active" : ""}`}
           onClick={() => onChangeView("ai")}
         >
-          <span>⚡ AI 추천</span>
-          <strong className="menuBadge">{aiCount}</strong>
-        </button>
+          <span className="menuLeft">
+            <Sparkles size={18} className="menuIcon" />
+            AI 추천
+          </span>
 
-        <button
-          className={`menuItem ${selectedView === "unread" ? "active" : ""}`}
-          onClick={() => onChangeView("unread")}
-        >
-          <span>🔔 안 읽음</span>
-          <strong className="menuBadge">{unreadCount}</strong>
+          <strong className="menuBadge">{aiCount}</strong>
         </button>
 
         <button
           className={`menuItem ${selectedView === "saved" ? "active" : ""}`}
           onClick={() => onChangeView("saved")}
         >
-          <span>🔖 저장됨</span>
+          <span className="menuLeft">
+            <Bookmark size={18} className="menuIcon" />
+            저장됨
+          </span>
         </button>
       </nav>
 
