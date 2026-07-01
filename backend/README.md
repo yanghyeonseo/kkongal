@@ -88,3 +88,7 @@ backend/
 
 - GET /api/notices/inbox/
 - GET /api/notices/inbox/{id}/
+
+## [ERD 수정사항]
+
+![alt text](DB_스키마.png)
