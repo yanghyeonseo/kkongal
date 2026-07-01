@@ -9,4 +9,9 @@ dependencies = [
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
     "drf-spectacular>=0.29.0",
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
+    "lxml>=6.1.1",
+    "pydantic>=2.13.4",
+    "python-dateutil>=2.9.0.post0",
 ]
