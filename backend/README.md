@@ -90,6 +90,18 @@ backend/
 - GET /api/notices/inbox/
 - GET /api/notices/inbox/{id}/
 - PATCH /api/notices/inbox/{id}/save/
+
+알림 채널 설정 API
+
+- GET /api/alert-channels/
+- POST /api/alert-channels/
+- PATCH /api/alert-channels/{id}/
+- DELETE /api/alert-channels/{id}/
+
+알림 로그 조회 API
+
+- GET /api/alert-logs/
+
   <br>
 
 ## [AI용 API]
@@ -108,6 +120,7 @@ AI 분석 결과 저장 (inbox_notices로)
 
 - POST /api/ai/inbox-notices/
 
+  <br>
   <br>
 
 ## [ERD 수정사항]
