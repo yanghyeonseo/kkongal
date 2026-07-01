@@ -49,7 +49,13 @@ backend/
 │
 ├─ notices/                  # 공지 원본 및 사용자별 inbox 공지
 │  ├─ models.py               # Notice, InboxNotice
-│  ├─ views.py                # inbox notice API
+│  ├─ views.py                # inbox notice API, AI용 notices API
+│  ├─ serializers.py
+│  └─ urls.py
+│
+├─ alert/                    # 알림 채널 및 발송 로그
+│  ├─ models.py               # AlertChannel, AlertLog
+│  ├─ views.py                # alert-channels API, alert-logs API
 │  ├─ serializers.py
 │  └─ urls.py
 │
