@@ -1,7 +1,18 @@
-function AiRecommendBox({ notices }) {
+import { isToday } from "../utils/date.js";
+
+function AiRecommendBox({ notices, interests }) {
   const recommended = notices
-    .filter((notice) => notice.relevanceScore >= 0.8)
+    .filter((notice) => isToday(notice.publishedAt))
+    .filter(
+      (notice) =>
+        notice.relevanceScore >= 0.8 || notice.matchedInterestTags?.length > 0,
+    )
     .slice(0, 3);
+
+  const interestSummary =
+    interests.length > 0
+      ? interests.map((interest) => interest.keyword).join(" / ")
+      : "관심사";
 
   return (
     <section className="aiBox">
@@ -10,26 +21,34 @@ function AiRecommendBox({ notices }) {
 
         <div>
           <p>AI 추천</p>
-          <h2>내 관심사에 맞는 새 공지 {recommended.length}건</h2>
+          <h2>
+            내 관심사({interestSummary})에 맞는 새 공지 {recommended.length}건
+          </h2>
         </div>
       </div>
 
       <div className="aiList">
-        {recommended.map((notice, index) => (
-          <a
-            key={notice.inboxNoticeId}
-            className="aiRow"
-            href={notice.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <span className="rank">{index + 1}</span>
-            <strong>{notice.title}</strong>
-            <em>{notice.sourceDisplayName}</em>
-            {notice.isNew && <b>NEW</b>}
-            <span className="arrow">›</span>
-          </a>
-        ))}
+        {recommended.length === 0 ? (
+          <div className="aiEmptyText">
+            오늘 올라온 공지 중 관심사와 일치하는 추천 공지가 아직 없어요.
+          </div>
+        ) : (
+          recommended.map((notice, index) => (
+            <a
+              key={notice.inboxNoticeId}
+              className="aiRow"
+              href={notice.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="rank">{index + 1}</span>
+              <strong>{notice.title}</strong>
+              <em>{notice.sourceDisplayName}</em>
+              <b>NEW</b>
+              <span className="arrow">›</span>
+            </a>
+          ))
+        )}
       </div>
     </section>
   );

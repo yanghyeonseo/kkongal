@@ -1,40 +1,50 @@
-import { mockSources } from "../data/mockSources.js";
+import { apiRequest } from "./client.js";
 
-const USE_MOCK = true;
+function normalizeSource(item) {
+  const source = item.source || item.notice_source || item;
 
-export async function getNoticeSources() {
-  if (USE_MOCK) {
-    return mockSources;
-  }
+  return {
+    id: source.id ?? item.source_id ?? item.id,
+    subscriptionId: item.id ?? item.subscription_id,
 
-  const response = await fetch("/api/notice-sources");
+    name: source.name ?? item.name ?? "",
+    displayName:
+      source.display_name ??
+      source.displayName ??
+      source.name ??
+      item.display_name ??
+      item.name ??
+      "공지 사이트",
 
-  if (!response.ok) {
-    throw new Error("사이트 목록을 불러오지 못했습니다.");
-  }
+    category:
+      source.category ??
+      source.source_type ??
+      item.category ??
+      item.source_type ??
+      "etc",
 
-  return response.json();
+    url: source.url ?? item.url ?? "",
+    isSubscribed: true,
+    notifyEnabled: item.notify_enabled ?? item.notifyEnabled ?? true,
+  };
 }
 
-export async function updateSourceSubscriptions(sourceIds) {
-  if (USE_MOCK) {
-    return {
-      message: "관심 사이트가 저장되었습니다.",
-      sourceIds,
-    };
-  }
+export async function getNoticeSources() {
+  const data = await apiRequest("/api/subscriptions/");
+  return data.map(normalizeSource);
+}
 
-  const response = await fetch("/api/me/source-subscriptions", {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ sourceIds }),
+export async function createSourceSubscription(sourceId) {
+  return apiRequest("/api/subscriptions/", {
+    method: "POST",
+    body: JSON.stringify({
+      source: sourceId,
+    }),
   });
+}
 
-  if (!response.ok) {
-    throw new Error("관심 사이트 저장에 실패했습니다.");
-  }
-
-  return response.json();
+export async function deleteSourceSubscription(subscriptionId) {
+  return apiRequest(`/api/subscriptions/${subscriptionId}/`, {
+    method: "DELETE",
+  });
 }

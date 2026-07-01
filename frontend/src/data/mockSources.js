@@ -13,7 +13,7 @@ export const mockSources = [
     displayName: "서울대 경영대 공지",
     category: "school",
     url: "https://cba.snu.ac.kr/newsroom/notice?sc=y",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 3,
@@ -37,7 +37,7 @@ export const mockSources = [
     displayName: "잡코리아 AI 채용",
     category: "job",
     url: "https://www.jobkorea.co.kr/recruit/ai-jobs?pageNo=1&pageSize=100",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 6,
@@ -45,7 +45,7 @@ export const mockSources = [
     displayName: "더드림코리아 장학금",
     category: "scholarship",
     url: "https://www.thedreamkorea.com/scholarships?tab=all",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 7,
@@ -53,7 +53,7 @@ export const mockSources = [
     displayName: "더드림코리아 대외활동",
     category: "activity",
     url: "https://www.thedreamkorea.com/activities",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 8,
@@ -61,7 +61,7 @@ export const mockSources = [
     displayName: "더드림코리아 공모전",
     category: "contest",
     url: "https://www.thedreamkorea.com/contests",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 9,
@@ -69,7 +69,7 @@ export const mockSources = [
     displayName: "인터파크 티켓 콘서트",
     category: "culture",
     url: "https://tickets.interpark.com/contents/genre/concert",
-    isSubscribed: false,
+    isSubscribed: true,
   },
   {
     id: 10,
@@ -77,6 +77,6 @@ export const mockSources = [
     displayName: "네이버 카페 공지",
     category: "community",
     url: "https://cafe.naver.com/f-e/cafes/31723403/menus/2",
-    isSubscribed: false,
+    isSubscribed: true,
   },
 ];
