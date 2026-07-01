@@ -91,4 +91,4 @@ backend/
 
 ## [ERD 수정사항]
 
-![alt text](DB_스키마.png)
+<img src="img/DB_스키마.png">
