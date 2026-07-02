@@ -44,11 +44,7 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
   };
 
   return (
-    <article
-      className={`noticeCard ${notice.isRead ? "read" : ""} ${
-        isAiReasonOpen ? "aiOpen" : ""
-      }`}
-    >
+    <article className={`noticeCard ${notice.isRead ? "read" : ""}`}>
       <div className="noticeTop">
         <div
           className="noticeLogo"

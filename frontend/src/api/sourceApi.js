@@ -48,3 +48,38 @@ export async function deleteSourceSubscription(subscriptionId) {
     method: "DELETE",
   });
 }
+
+// 지원 사이트 카탈로그: config 기반 목록.
+// 백엔드: [{ name, url, category, subscribed: bool, source_id: int|null }]
+function normalizeCatalogItem(item) {
+  const url = item.url ?? "";
+  const name = (item.name && item.name.trim()) || displayNameFromUrl(url);
+  return {
+    name,
+    url,
+    category: item.category ?? "etc",
+    subscribed: item.subscribed ?? false,
+    sourceId: item.source_id ?? null,
+  };
+}
+
+export async function getSourceCatalog() {
+  const data = await apiRequest("/api/sources/catalog/");
+  return Array.isArray(data) ? data.map(normalizeCatalogItem) : [];
+}
+
+// 온디맨드 동기화: 해당 소스를 즉시 크롤+선별한다.
+// 백엔드: { crawled, fetched, new_notices, inbox_added, message }
+export async function syncSource(sourceId) {
+  const data = await apiRequest(`/api/sources/${sourceId}/sync/`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return {
+    crawled: data?.crawled ?? false,
+    fetched: Number(data?.fetched ?? 0),
+    newNotices: Number(data?.new_notices ?? 0),
+    inboxAdded: Number(data?.inbox_added ?? 0),
+    message: data?.message ?? "",
+  };
+}

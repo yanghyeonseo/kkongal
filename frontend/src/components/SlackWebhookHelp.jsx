@@ -74,23 +74,10 @@ function SlackWebhookHelp() {
 
       {isOpen && (
         <ModalShell
-          className="helpDialog"
-          ariaLabel="슬랙 Webhook URL 받는 방법"
+          size="sm"
           onClose={() => setIsOpen(false)}
+          title="슬랙 Webhook URL 받는 방법"
         >
-          <div className="helpDialogHeader">
-            <h3>슬랙 Webhook URL 받는 방법</h3>
-            <button
-              type="button"
-              className="modalCloseButton"
-              onClick={() => setIsOpen(false)}
-              aria-label="도움말 닫기"
-            >
-              ×
-            </button>
-          </div>
-
-          <div className="helpDialogBody">
             <ol className="helpSteps">
               {STEPS.map((step) => (
                 <li key={step.title} className="helpStep">
@@ -119,7 +106,6 @@ function SlackWebhookHelp() {
               Slack 공식 가이드 열기
               <ExternalLink size={14} />
             </a>
-          </div>
         </ModalShell>
       )}
     </>

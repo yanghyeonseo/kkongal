@@ -23,6 +23,9 @@ function normalizeUser(data, fallback = {}) {
     age: user.age ?? null,
     job: user.job ?? "",
     gender: user.gender ?? "",
+    // 온보딩 상태. 백엔드가 아직 필드를 안 내려주면(undefined) 위저드를 띄우지 않는다
+    // (병렬 개발 안전장치). 명시적으로 false 일 때만 온보딩을 표시한다.
+    onboarded: user.onboarded ?? fallback.onboarded ?? null,
   };
 }
 
@@ -85,6 +88,15 @@ export async function login({ username, password }) {
   });
 
   return normalizeUser(data, { username });
+}
+
+// 온보딩 완료: request.user.onboarded = True 후 user 반환.
+export async function completeOnboarding() {
+  const data = await apiRequest("/api/account/onboarding/complete/", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return normalizeUser(data);
 }
 
 export async function logout() {

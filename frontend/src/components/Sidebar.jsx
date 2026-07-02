@@ -1,4 +1,4 @@
-import { Globe, Sparkles, Bookmark, Plus } from "lucide-react";
+import { Globe, Sparkles, Bookmark, Plus, RefreshCw } from "lucide-react";
 
 function Sidebar({
   sources,
@@ -9,8 +9,14 @@ function Sidebar({
   savedCount,
   activeSourceIds,
   onToggleSource,
+  syncingSourceIds = [],
+  onSyncSource,
+  onSyncAll,
 }) {
   const subscribedSources = sources.filter((source) => source.isSubscribed);
+  const syncingAll =
+    subscribedSources.length > 0 &&
+    subscribedSources.every((source) => syncingSourceIds.includes(source.id));
 
   const MENU = [
     { id: "all", label: "전체", Icon: Globe, badge: null },
@@ -39,7 +45,22 @@ function Sidebar({
 
       <div className="divider" />
 
-      <p className="sideTitle">내 사이트</p>
+      <div className="siteListHead">
+        <span className="sideTitle" style={{ margin: 0, padding: 0 }}>
+          내 사이트
+        </span>
+        {subscribedSources.length > 0 && onSyncAll && (
+          <button
+            type="button"
+            className="syncAllButton"
+            onClick={onSyncAll}
+            disabled={syncingAll}
+            title="구독 중인 모든 사이트에서 새 공지 가져오기"
+          >
+            <RefreshCw size={13} className={syncingAll ? "spin" : ""} /> 전체 동기화
+          </button>
+        )}
+      </div>
 
       <div className="siteList">
         {subscribedSources.length === 0 ? (
@@ -47,17 +68,29 @@ function Sidebar({
         ) : (
           subscribedSources.map((source) => {
             const isActive = activeSourceIds.includes(source.id);
+            const isSyncing = syncingSourceIds.includes(source.id);
             return (
-              <button
-                key={source.id}
-                className={`sitePill ${isActive ? "active" : "inactive"}`}
-                aria-pressed={isActive}
-                title={source.url}
-                onClick={() => onToggleSource(source.id)}
-              >
-                <span className="dot" />
-                {source.displayName}
-              </button>
+              <div className="siteRow" key={source.id}>
+                <button
+                  className={`sitePill ${isActive ? "active" : "inactive"}`}
+                  aria-pressed={isActive}
+                  title={source.url}
+                  onClick={() => onToggleSource(source.id)}
+                >
+                  <span className="dot" />
+                  {source.displayName}
+                </button>
+                <button
+                  type="button"
+                  className="syncPillButton"
+                  onClick={() => onSyncSource?.(source.id)}
+                  disabled={isSyncing}
+                  title={isSyncing ? "가져오는 중..." : "새 공지 동기화"}
+                  aria-label={`${source.displayName} 새 공지 동기화`}
+                >
+                  <RefreshCw size={15} className={isSyncing ? "spin" : ""} />
+                </button>
+              </div>
             );
           })
         )}

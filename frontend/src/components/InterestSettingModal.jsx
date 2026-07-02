@@ -113,27 +113,12 @@ function InterestSettingModal({ interests, onClose, onInterestsChange }) {
 
   return (
     <ModalShell
-      className="interestModal"
-      labelledBy="interestModalTitle"
+      size="lg"
       onClose={onClose}
+      title="관심사 설정"
+      subtitle="AI가 공지를 선별할 때 사용할 관심 조건을 관리하세요."
     >
-      <div className="registerModalHeader">
-        <div>
-          <h2 id="interestModalTitle">관심사 설정</h2>
-          <p>AI가 공지를 선별할 때 사용할 관심 조건을 관리하세요.</p>
-        </div>
-        <button
-          type="button"
-          className="modalCloseButton"
-          onClick={onClose}
-          aria-label="닫기"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="interestModalBody">
-        <section className="currentTagSection">
+      <section className="currentTagSection">
           <div className="sectionTitleRow">
             <div>
               <h3>현재 관심 조건</h3>
@@ -269,7 +254,6 @@ function InterestSettingModal({ interests, onClose, onInterestsChange }) {
               : "아직 등록된 관심사가 없습니다"}
           </strong>
         </div>
-      </div>
     </ModalShell>
   );
 }

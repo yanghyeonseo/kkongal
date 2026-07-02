@@ -24,7 +24,16 @@ export async function createAlertChannel({ type, config, isActive = true }) {
     method: "POST",
     body: JSON.stringify({ type, config, is_active: isActive }),
   });
-  return normalizeChannel(data);
+  const channel = normalizeChannel(data);
+  // 채널 생성 직후 백엔드가 확인 메시지를 발송하고 결과를 함께 내려준다.
+  // { confirmation: { ok, error } } — 발송 실패해도 채널 생성 자체는 성공.
+  if (data && typeof data === "object" && data.confirmation) {
+    channel.confirmation = {
+      ok: data.confirmation.ok !== false,
+      error: data.confirmation.error ?? "",
+    };
+  }
+  return channel;
 }
 
 export async function updateAlertChannel(channelId, patch) {

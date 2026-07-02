@@ -2,7 +2,7 @@ import { Sparkles, ArrowUpRight } from "lucide-react";
 import { isToday } from "../utils/date.js";
 import { isAiMatched, formatRelevance, relevanceTier } from "../utils/relevance.js";
 
-function AiRecommendBox({ notices, interests }) {
+function AiRecommendBox({ notices, interests, onOpenNotice }) {
   const recommended = notices
     .filter((notice) => isToday(notice.publishedAt))
     .filter(isAiMatched)
@@ -39,12 +39,11 @@ function AiRecommendBox({ notices, interests }) {
           recommended.map((notice, index) => {
             const tier = relevanceTier(notice.relevanceScore);
             return (
-              <a
+              <button
+                type="button"
                 key={notice.inboxNoticeId}
                 className="aiRow"
-                href={notice.url}
-                target="_blank"
-                rel="noreferrer"
+                onClick={() => onOpenNotice(notice)}
               >
                 <span className={`rank tier-${tier}`}>{index + 1}</span>
 
@@ -60,7 +59,7 @@ function AiRecommendBox({ notices, interests }) {
                   {formatRelevance(notice.relevanceScore)}
                 </span>
                 <ArrowUpRight size={18} className="aiRowArrow" aria-hidden="true" />
-              </a>
+              </button>
             );
           })
         )}

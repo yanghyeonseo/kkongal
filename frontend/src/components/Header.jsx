@@ -47,7 +47,7 @@ function Header({
         <div className="brandIcon">
           <Bell size={21} strokeWidth={2.4} />
         </div>
-        <strong>맞춤 공지 알리미</strong>
+        <strong>꽁알</strong>
       </div>
 
       <div className="searchBox">

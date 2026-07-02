@@ -35,6 +35,18 @@ function isValidWebhook(url) {
 function AlertSettingsModal({ currentUser, onClose }) {
   const toast = useToast();
 
+  // 채널 생성 직후 백엔드가 보낸 연동 확인 메시지 결과(confirmation)를 사용자에게 반영한다.
+  const reflectConfirmation = (channel, label) => {
+    const confirmation = channel.confirmation;
+    if (!confirmation) {
+      toast.success(`${label} 알림 채널을 추가했어요.`);
+    } else if (confirmation.ok) {
+      toast.success(`${label} 채널을 연동했어요 · 확인 메시지를 보냈어요.`);
+    } else {
+      toast.info(`${label} 채널을 추가했어요. 확인 메시지 발송은 실패했어요.`);
+    }
+  };
+
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -83,7 +95,7 @@ function AlertSettingsModal({ currentUser, onClose }) {
         config: { address },
       });
       setChannels((prev) => [...prev, channel]);
-      toast.success("이메일 알림 채널을 추가했어요.");
+      reflectConfirmation(channel, "이메일");
     } catch (error) {
       toast.error(error.message || "이메일 채널 추가에 실패했어요.");
     } finally {
@@ -106,7 +118,7 @@ function AlertSettingsModal({ currentUser, onClose }) {
       });
       setChannels((prev) => [...prev, channel]);
       setNewWebhook("");
-      toast.success("슬랙 알림 채널을 추가했어요.");
+      reflectConfirmation(channel, "슬랙");
     } catch (error) {
       toast.error(error.message || "슬랙 채널 추가에 실패했어요.");
     } finally {
@@ -162,27 +174,12 @@ function AlertSettingsModal({ currentUser, onClose }) {
 
   return (
     <ModalShell
-      className="alertModal"
-      labelledBy="alertModalTitle"
+      size="md"
       onClose={onClose}
+      title="알림 설정"
+      subtitle="선별된 공지를 이메일과 슬랙으로 받아보세요."
     >
-      <div className="registerModalHeader">
-        <div>
-          <h2 id="alertModalTitle">알림 설정</h2>
-          <p>선별된 공지를 이메일과 슬랙으로 받아보세요.</p>
-        </div>
-        <button
-          type="button"
-          className="modalCloseButton"
-          onClick={onClose}
-          aria-label="닫기"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="alertModalBody">
-        <section className="alertSection">
+      <section className="alertSection">
           <h3 className="alertSectionTitle">내 알림 채널</h3>
 
           {loading ? (
@@ -375,7 +372,6 @@ function AlertSettingsModal({ currentUser, onClose }) {
             </p>
           </div>
         </section>
-      </div>
     </ModalShell>
   );
 }

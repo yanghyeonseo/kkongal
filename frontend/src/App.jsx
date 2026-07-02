@@ -9,9 +9,11 @@ import SiteRegisterModal from "./components/SiteRegisterModal.jsx";
 import InterestSettingModal from "./components/InterestSettingModal.jsx";
 import AlertSettingsModal from "./components/AlertSettingsModal.jsx";
 import AuthModal from "./components/AuthModal.jsx";
+import Landing from "./components/Landing.jsx";
+import OnboardingWizard from "./components/OnboardingWizard.jsx";
 
 import { getMyInboxNotices, toggleInboxNoticeSave } from "./api/inboxApi.js";
-import { getNoticeSources } from "./api/sourceApi.js";
+import { getNoticeSources, syncSource } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import {
   getStoredUser,
@@ -21,12 +23,13 @@ import {
   logout,
 } from "./api/authApi.js";
 
-import { isToday } from "./utils/date.js";
+import { Globe, Plus } from "lucide-react";
+
 import { isAiMatched } from "./utils/relevance.js";
 import { useToast } from "./context/toast.js";
 
 const VIEW_TITLES = {
-  all: "오늘 새 공지",
+  all: "전체 공지",
   ai: "AI 추천 공지",
   saved: "저장한 공지",
 };
@@ -61,6 +64,7 @@ function App() {
   const [authMode, setAuthMode] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [syncingSourceIds, setSyncingSourceIds] = useState([]);
 
   // 최초 진입 시 쿠키(access_token) 기준으로 로그인 상태를 복원한다.
   useEffect(() => {
@@ -177,6 +181,77 @@ function App() {
     setActiveSourceIds((prev) => prev.filter((id) => id !== source.id));
   };
 
+  // 온디맨드 동기화: 해당 사이트를 즉시 크롤+선별한 뒤 인박스를 새로고침한다.
+  // opts.silentUnsupported: 첫 구독 직후 자동 호출 시 '자동 수집 미지원(400)'은 조용히 넘긴다.
+  const handleSyncSource = useCallback(
+    async (sourceId, opts = {}) => {
+      setSyncingSourceIds((prev) =>
+        prev.includes(sourceId) ? prev : [...prev, sourceId],
+      );
+      try {
+        const result = await syncSource(sourceId);
+        const nextNotices = await getMyInboxNotices();
+        setNotices(nextNotices);
+
+        const added = result.inboxAdded || result.newNotices || 0;
+        if (added > 0) {
+          toast.success(`${added}건 새로 추천했어요.`);
+        } else if (result.message) {
+          toast.info(result.message);
+        } else {
+          toast.info("새로 추천할 공지가 없어요.");
+        }
+      } catch (error) {
+        if (opts.silentUnsupported && error?.status === 400) {
+          // 자동 수집 미지원 사이트를 자동 sync 한 경우 — 사용자에게 알리지 않음
+          console.info("sync skipped:", error.message);
+        } else {
+          toast.error(error.message || "동기화에 실패했어요.");
+        }
+      } finally {
+        setSyncingSourceIds((prev) => prev.filter((id) => id !== sourceId));
+      }
+    },
+    [toast],
+  );
+
+  // 전체 동기화: 구독 중인 모든 사이트를 병렬로 sync 하고, 결과를 한 번에 요약한다.
+  const handleSyncAll = useCallback(async () => {
+    const ids = sources.filter((source) => source.isSubscribed).map((source) => source.id);
+    if (ids.length === 0) return;
+
+    setSyncingSourceIds(ids);
+    let added = 0;
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const result = await syncSource(id);
+          added += result.inboxAdded || result.newNotices || 0;
+        } catch {
+          // 개별 사이트 실패(자동 수집 미지원 등)는 무시하고 전체는 계속 진행
+        }
+      }),
+    );
+    try {
+      setNotices(await getMyInboxNotices());
+    } catch {
+      // 인박스 새로고침 실패는 조용히 무시
+    }
+    setSyncingSourceIds([]);
+    if (added > 0) toast.success(`${added}건 새로 추천했어요.`);
+    else toast.info("새로 추천할 공지가 없어요.");
+  }, [sources, toast]);
+
+  const handleOnboardingComplete = useCallback(
+    (user) => {
+      const nextUser = { ...user, onboarded: true };
+      setCurrentUser(nextUser);
+      saveStoredUser(nextUser);
+      toast.success("설정을 마쳤어요! 맞춤 공지를 확인해보세요.");
+    },
+    [toast],
+  );
+
   const handleOpenNotice = (notice) => {
     setNotices((prev) =>
       prev.map((item) =>
@@ -226,25 +301,24 @@ function App() {
     });
   }, [notices, activeSourceIds]);
 
-  const aiCount = useMemo(
-    () => sourceFilteredNotices.filter(isAiMatched).length,
-    [sourceFilteredNotices],
-  );
+  // 배지/뷰는 사이드바 소스 토글과 무관하게 durable 하도록 전체 notices 기준으로 센다.
+  const aiCount = useMemo(() => notices.filter(isAiMatched).length, [notices]);
 
   const savedCount = useMemo(
-    () => sourceFilteredNotices.filter((notice) => notice.isSaved).length,
-    [sourceFilteredNotices],
-  );
-
-  const todayNoticeCount = useMemo(
-    () => sourceFilteredNotices.filter((notice) => isToday(notice.publishedAt)).length,
-    [sourceFilteredNotices],
+    () => notices.filter((notice) => notice.isSaved).length,
+    [notices],
   );
 
   const filteredNotices = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    // 저장됨/AI 추천 뷰는 durable: 소스 토글과 무관하게 전체 notices 에서 뽑는다.
+    // '전체' 뷰만 소스 필터(sourceFilteredNotices)를 적용한다.
+    const base =
+      selectedView === "saved" || selectedView === "ai"
+        ? notices
+        : sourceFilteredNotices;
 
-    return sourceFilteredNotices.filter((notice) => {
+    return base.filter((notice) => {
       if (selectedView === "ai" && !isAiMatched(notice)) return false;
       if (selectedView === "saved" && !notice.isSaved) return false;
       if (selectedCategory === "deadline" && !notice.isDeadlineSoon) return false;
@@ -263,7 +337,7 @@ function App() {
 
       return true;
     });
-  }, [sourceFilteredNotices, selectedView, selectedCategory, searchQuery]);
+  }, [notices, sourceFilteredNotices, selectedView, selectedCategory, searchQuery]);
 
   const totalPages = Math.ceil(filteredNotices.length / NOTICES_PER_PAGE) || 1;
   const paginatedNotices = useMemo(() => {
@@ -271,8 +345,8 @@ function App() {
     return filteredNotices.slice(startIndex, startIndex + NOTICES_PER_PAGE);
   }, [filteredNotices, currentPage]);
 
-  const headlineCount =
-    selectedView === "all" ? todayNoticeCount : filteredNotices.length;
+  // 헤드라인 수치는 항상 실제로 보여주는 카드 수와 일치시킨다.
+  const headlineCount = filteredNotices.length;
 
   const renderNoticeArea = () => {
     if (dashboardLoading) {
@@ -304,12 +378,35 @@ function App() {
     }
 
     if (paginatedNotices.length === 0) {
+      const hasSubscriptions = sources.some((source) => source.isSubscribed);
+
+      // 첫 진입(구독 사이트 0개)은 사이드바도 비어 있으니 "켜주세요"가 아니라
+      // 사이트 등록으로 유도하는 별도 CTA 를 보여준다.
+      if (!hasSubscriptions && !searchQuery.trim()) {
+        return (
+          <div className="emptyNoticeBox cta">
+            <span className="emptyCtaIcon" aria-hidden="true">
+              <Globe size={26} />
+            </span>
+            <strong>아직 등록한 사이트가 없어요</strong>
+            <p>관심 사이트를 등록하면 새 공지를 AI가 골라 모아드려요.</p>
+            <button
+              type="button"
+              className="primaryButton"
+              onClick={() => setIsSiteRegisterOpen(true)}
+            >
+              <Plus size={16} /> 사이트 등록하기
+            </button>
+          </div>
+        );
+      }
+
       let message = "조건에 맞는 공지가 아직 없어요.";
       if (searchQuery.trim()) message = `'${searchQuery.trim()}' 검색 결과가 없어요.`;
-      else if (activeSourceIds.length === 0)
-        message = "왼쪽에서 볼 사이트를 하나 이상 켜주세요.";
       else if (selectedView === "saved") message = "저장한 공지가 아직 없어요.";
       else if (selectedView === "ai") message = "AI가 강하게 추천하는 공지가 아직 없어요.";
+      else if (activeSourceIds.length === 0)
+        message = "왼쪽에서 볼 사이트를 하나 이상 켜주세요.";
 
       return <div className="emptyNoticeBox">{message}</div>;
     }
@@ -328,43 +425,36 @@ function App() {
     );
   };
 
-  return (
-    <div className="app">
-      <Header
-        currentUser={currentUser}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        onOpenAuth={handleOpenAuth}
-        onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
-        onOpenInterestSetting={() => setIsInterestSettingOpen(true)}
-        onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
-        onLogout={handleLogout}
-      />
+  const showOnboarding = currentUser && currentUser.onboarded === false;
 
-      {authLoading ? (
-        <main className="authGate">
-          <div className="authRequiredBox">
-            <span className="bigSpinner" aria-hidden="true" />
-            <strong>불러오는 중...</strong>
-          </div>
-        </main>
-      ) : !currentUser ? (
-        <main className="authGate">
-          <div className="authRequiredBox landing">
-            <div className="landingIcon">🔔</div>
-            <strong>로그인하고 맞춤 공지를 받아보세요</strong>
-            <p>여러 사이트의 공지를 AI가 골라 한 곳에 모아드려요.</p>
-            <div className="landingButtons">
-              <button className="signupButton" onClick={() => handleOpenAuth("signup")}>
-                회원가입
-              </button>
-              <button className="loginButton" onClick={() => handleOpenAuth("login")}>
-                로그인
-              </button>
-            </div>
-          </div>
-        </main>
-      ) : (
+  let content;
+  if (authLoading) {
+    content = (
+      <div className="bootLoader">
+        <span className="bigSpinner" aria-hidden="true" />
+        <strong>불러오는 중...</strong>
+      </div>
+    );
+  } else if (!currentUser) {
+    content = <Landing onOpenAuth={handleOpenAuth} />;
+  } else if (showOnboarding) {
+    content = (
+      <OnboardingWizard user={currentUser} onComplete={handleOnboardingComplete} />
+    );
+  } else {
+    content = (
+      <div className="app">
+        <Header
+          currentUser={currentUser}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onOpenAuth={handleOpenAuth}
+          onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
+          onOpenInterestSetting={() => setIsInterestSettingOpen(true)}
+          onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
+          onLogout={handleLogout}
+        />
+
         <div className="dashboard">
           <Sidebar
             sources={sources}
@@ -375,10 +465,17 @@ function App() {
             savedCount={savedCount}
             activeSourceIds={activeSourceIds}
             onToggleSource={handleToggleSource}
+            syncingSourceIds={syncingSourceIds}
+            onSyncSource={handleSyncSource}
+            onSyncAll={handleSyncAll}
           />
 
           <main className="main">
-            <AiRecommendBox notices={sourceFilteredNotices} interests={interests} />
+            <AiRecommendBox
+              notices={sourceFilteredNotices}
+              interests={interests}
+              onOpenNotice={handleOpenNotice}
+            />
 
             <section className="noticeSection">
               <div className="noticeTitleRow">
@@ -403,7 +500,9 @@ function App() {
                 </div>
               </div>
 
-              {renderNoticeArea()}
+              <div className="viewFade" key={`${selectedView}-${selectedCategory}`}>
+                {renderNoticeArea()}
+              </div>
 
               {!dashboardLoading && filteredNotices.length > NOTICES_PER_PAGE && (
                 <div className="pagination">
@@ -427,14 +526,21 @@ function App() {
             </section>
           </main>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {isSiteRegisterOpen && (
+  return (
+    <>
+      {content}
+
+      {isSiteRegisterOpen && currentUser && (
         <SiteRegisterModal
           sources={sources}
           onClose={() => setIsSiteRegisterOpen(false)}
           onSourceAdded={handleSourceAdded}
           onSourceRemoved={handleSourceRemoved}
+          onSyncSource={handleSyncSource}
         />
       )}
 
@@ -460,7 +566,7 @@ function App() {
           onAuthSuccess={handleAuthSuccess}
         />
       )}
-    </div>
+    </>
   );
 }
 
