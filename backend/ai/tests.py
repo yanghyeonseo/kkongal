@@ -143,7 +143,10 @@ class FallbackPathTests(BaseFixtures):
         )
         self.assertGreaterEqual(row.relevance_score, 0.5)
         self.assertIn("채용", row.matched_keywords)
-        self.assertIn("키워드 매칭", row.reason)
+        self.assertIn("관심 키워드와 일치", row.reason)
+        # 내부 note(미설정/실패 등)는 사용자 노출 reason 에 새지 않아야 한다.
+        self.assertNotIn("미설정", row.reason)
+        self.assertNotIn("실패", row.reason)
 
     def test_api_failure_falls_back(self) -> None:
         # 키는 있지만 API 가 500 → 폴백으로 전환(예외 전파 없음)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -30,6 +31,12 @@ logger = logging.getLogger("ai")
 # provider 값
 PROVIDER_LLM = "llm"
 PROVIDER_FALLBACK = "fallback"
+
+# 일시적 과부하(429 Too Many Requests / 503 Service Unavailable, Gemini 무료 티어 등)
+# 는 짧게 재시도하면 대개 성공한다. 그래도 실패하면 키워드 폴백으로 넘어간다.
+_RETRY_STATUSES = frozenset({429, 503})
+_MAX_RETRIES = 2
+_RETRY_BACKOFF = 0.6
 
 
 @dataclass
@@ -193,7 +200,19 @@ class LLMClient:
         with httpx.Client(
             timeout=self.timeout, transport=self._transport
         ) as client:
-            response = client.post(url, headers=headers, json=payload)
+            for attempt in range(_MAX_RETRIES + 1):
+                response = client.post(url, headers=headers, json=payload)
+                if (
+                    response.status_code in _RETRY_STATUSES
+                    and attempt < _MAX_RETRIES
+                ):
+                    logger.info(
+                        "LLM %s 일시 과부하 → 재시도 %d/%d",
+                        response.status_code, attempt + 1, _MAX_RETRIES,
+                    )
+                    time.sleep(_RETRY_BACKOFF * (attempt + 1))
+                    continue
+                break
             response.raise_for_status()
             body = response.json()
 
@@ -254,12 +273,13 @@ class LLMClient:
         if matched:
             fraction = len(matched) / max(len(keyworded), 1)
             score = round(min(1.0, 0.5 + 0.5 * fraction), 3)
-            reason = "키워드 매칭: " + ", ".join(matched)
+            reason = "관심 키워드와 일치: " + ", ".join(matched)
         else:
             score = 0.0
-            reason = "키워드 매칭 없음"
+            reason = "관심 키워드와 일치하는 내용 없음"
+        # note(예: 'LLM 호출 실패')는 내부 디버깅용 — 사용자에게 보이는 reason 에는 넣지 않는다.
         if note:
-            reason = f"{reason} ({note})"
+            logger.debug("fallback reason note: %s", note)
 
         return Verdict(
             relevant=bool(matched),
