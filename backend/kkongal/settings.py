@@ -141,7 +141,8 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # 헤더(Bearer) + access_token 쿠키 모두 지원(프론트 쿠키 흐름 인증)
+        'account.authentication.CookieJWTAuthentication',
     )
 }
 

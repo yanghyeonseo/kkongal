@@ -74,6 +74,7 @@ class Command(BaseCommand):
             f"inbox 생성: {summary.created}",
             f"inbox 갱신: {summary.updated}",
             f"임계값 미만 제외: {summary.below_threshold}",
+            f"다운그레이드 삭제: {summary.downgraded}",
             f"기존 분류 생략: {summary.skipped_existing}",
             f"오류: {summary.errors}",
             f"판정 경로: {summary.provider} "

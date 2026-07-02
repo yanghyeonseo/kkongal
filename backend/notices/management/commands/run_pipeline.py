@@ -45,9 +45,11 @@ class Command(BaseCommand):
         ok = True
 
         if opts["crawl"]:
+            # no_match=True: 순진한 키워드 매처를 끄고 AI 선별을 유일한 선별기로 둔다.
+            # (matcher 는 AI 미실행 시 독립 폴백으로만 남긴다.)
             ok = self._step(
-                "크롤링 (crawl_notices)", "crawl_notices",
-                source=opts.get("source"),
+                "크롤링 (crawl_notices, --no-match)", "crawl_notices",
+                source=opts.get("source"), no_match=True,
             ) and ok
 
         if not opts["no_classify"]:

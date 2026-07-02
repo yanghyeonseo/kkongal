@@ -2,6 +2,7 @@ from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -122,6 +123,10 @@ class InboxNoticeSaveView(APIView):
 
 
 class AiNoticeListView(APIView):
+    # 내부 파이프라인/서비스 전용. 익명 접근 시 유저 PII/공지 열람을 막기 위해 admin(staff) 한정.
+    # (실제 선별은 ai.service 가 ORM 으로 직접 수행 — 이 HTTP 엔드포인트는 외부 워커용.)
+    permission_classes = [IsAdminUser]
+
     @extend_schema(
         summary="AI 분석용 공지 목록 조회",
         description="크롤링되어 저장된 공지 목록을 AI 분석용으로 조회합니다.",
@@ -149,6 +154,9 @@ class AiNoticeListView(APIView):
 
 
 class AiNoticeCandidateListView(APIView):
+    # 구독자 이메일/프로필(PII)을 반환하므로 admin(staff) 한정. (C1 대응)
+    permission_classes = [IsAdminUser]
+
     @extend_schema(
         summary="AI 분석용 후보 유저/관심사 조회",
         description="공지의 출처 사이트를 구독한 사용자와 각 사용자의 관심사를 조회합니다.",
@@ -199,6 +207,9 @@ class AiNoticeCandidateListView(APIView):
 
 
 class AiInboxNoticeCreateView(APIView):
+    # 임의 user_id 로 타인 inbox 에 쓰기가 가능하므로(알림 주입 위험) admin(staff) 한정. (C2 대응)
+    permission_classes = [IsAdminUser]
+
     @extend_schema(
         summary="AI 분석 결과 inbox 저장",
         description="AI가 분석한 사용자별 공지 매칭 결과를 inbox_notice에 생성하거나 업데이트합니다.",

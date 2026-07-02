@@ -17,6 +17,7 @@ from notices.models import InboxNotice, Notice
 from sources.models import NoticeSource
 
 from .models import AlertChannel, AlertLog
+from .serializers import AlertChannelSerializer
 from .service import dispatch_pending
 
 User = get_user_model()
@@ -182,6 +183,8 @@ class SlackDispatchTests(AlertTestBase):
         log = AlertLog.objects.get(inbox_notice_id=inbox)
         self.assertEqual(log.status, AlertLog.Status.FAILED)
         self.assertIn("500", log.error)
+        # 업스트림 응답 본문("server error")은 API 로 노출되는 error 에 새지 않는다(H3).
+        self.assertNotIn("server error", log.error)
         self.assertIsNone(log.sent_at)
         # 실패해도 시도했으므로 재발송 방지를 위해 notified_at 은 설정됨
         inbox.refresh_from_db()
@@ -312,6 +315,41 @@ class NoChannelTests(AlertTestBase):
         self.assertEqual(len(mail.outbox), 0)
         self.assertEqual(summary["attempted"], 0)
 
+    def test_unsupported_channel_type_only_is_skipped(self):
+        # kakao 는 실제 발송기가 없다(get_sender→None). '발송 가능한 채널 없음'
+        # 과 동일하게 취급되어 notified_at 은 NULL 로 남고 아무것도 보내지 않으며,
+        # 나중에 email/slack 을 추가하면 재시도된다(블랙홀 방지 — S2).
+        notice = self.make_notice("https://snu.example.com/nc/3")
+        inbox = self.make_inbox(notice)
+        self.make_channel("kakao", config={})
+
+        summary = dispatch_pending()
+
+        inbox.refresh_from_db()
+        self.assertIsNone(inbox.notified_at)
+        self.assertEqual(AlertLog.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(summary["attempted"], 0)
+        self.assertEqual(summary["users_notified"], 0)
+
+    def test_unsupported_channel_alongside_email_still_sends_email(self):
+        # kakao(미지원) + email(지원) → email 만 발송, kakao 는 조용히 무시(로그 없음).
+        notice = self.make_notice("https://snu.example.com/nc/4")
+        inbox = self.make_inbox(notice)
+        self.make_channel("kakao", config={})
+        self.make_channel("email", config={})
+
+        summary = dispatch_pending()
+
+        self.assertEqual(len(mail.outbox), 1)
+        inbox.refresh_from_db()
+        self.assertIsNotNone(inbox.notified_at)
+        # 발송을 시도한 email 채널에 대해서만 로그가 남는다(1건).
+        self.assertEqual(AlertLog.objects.count(), 1)
+        self.assertEqual(summary["attempted"], 1)
+        self.assertEqual(summary["sent"], 1)
+        self.assertEqual(summary["users_notified"], 1)
+
 
 @override_settings(EMAIL_BACKEND=LOCMEM_EMAIL, LLM_RELEVANCE_THRESHOLD=0.5)
 class UserScopingTests(AlertTestBase):
@@ -342,8 +380,10 @@ class TestSendEndpointTests(AlertTestBase):
     def _url(self, channel_id):
         return f"/api/alert-channels/{channel_id}/test/"
 
-    def test_owner_email_test_send(self):
-        channel = self.make_channel("email", config={"address": "alice@example.com"})
+    def test_owner_email_test_send_ignores_config_address(self):
+        # M4: 테스트 발송은 사용자 지정 config.address 를 무시하고 반드시 회원
+        # 이메일로만 간다(임의 수신자 대상 증폭기 악용 방지).
+        channel = self.make_channel("email", config={"address": "attacker@evil.com"})
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(self._url(channel.id))
@@ -352,6 +392,8 @@ class TestSendEndpointTests(AlertTestBase):
         self.assertTrue(response.data["ok"])
         self.assertEqual(response.data["error"], "")
         self.assertEqual(len(mail.outbox), 1)
+        # config.address 가 아니라 회원 이메일로 발송되어야 한다
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
         self.assertIn("테스트", mail.outbox[0].subject)
         # 테스트 발송은 AlertLog 를 남기지 않는다
         self.assertEqual(AlertLog.objects.count(), 0)
@@ -399,3 +441,59 @@ class TestSendEndpointTests(AlertTestBase):
         response = self.client.post(self._url(channel.id))
 
         self.assertEqual(response.status_code, 401)
+
+
+class AlertChannelSerializerValidationTests(TestCase):
+    """H3: 채널 config 검증 (슬랙 webhook SSRF 방어 + 이메일 주소 유효성)."""
+
+    def test_slack_rejects_non_hooks_host(self):
+        serializer = AlertChannelSerializer(
+            data={
+                "type": "slack",
+                "config": {"webhook_url": "https://evil.example.com/hook"},
+            }
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("config", serializer.errors)
+
+    def test_slack_rejects_http_scheme(self):
+        serializer = AlertChannelSerializer(
+            data={
+                "type": "slack",
+                "config": {"webhook_url": "http://hooks.slack.com/services/A/B/C"},
+            }
+        )
+        self.assertFalse(serializer.is_valid())
+
+    def test_slack_requires_webhook_url(self):
+        serializer = AlertChannelSerializer(data={"type": "slack", "config": {}})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("config", serializer.errors)
+
+    def test_slack_accepts_valid_hooks_url(self):
+        serializer = AlertChannelSerializer(
+            data={
+                "type": "slack",
+                "config": {
+                    "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXXXXXX"
+                },
+            }
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_email_rejects_invalid_address(self):
+        serializer = AlertChannelSerializer(
+            data={"type": "email", "config": {"address": "not-an-email"}}
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("config", serializer.errors)
+
+    def test_email_allows_empty_address(self):
+        serializer = AlertChannelSerializer(data={"type": "email", "config": {}})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_email_accepts_valid_address(self):
+        serializer = AlertChannelSerializer(
+            data={"type": "email", "config": {"address": "user@example.com"}}
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)

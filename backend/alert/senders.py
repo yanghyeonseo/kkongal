@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 from dataclasses import dataclass
 
 import httpx
 from django.conf import settings
+
+logger = logging.getLogger("alert")
 
 # 한 메시지에 담는 공지 최대 개수(가독성/페이로드 크기 제한). 초과분은 요약 표시.
 MAX_ITEMS_PER_MESSAGE = 10
@@ -142,18 +145,26 @@ class EmailSender(BaseSender):
         )
 
     def send_test(self, user):
+        # 테스트 발송은 반드시 본인(회원) 이메일로만 보낸다. 사용자가 지정한
+        # config.address 로는 보내지 않아, 임의 수신자에게 메일을 쏘는 증폭기로
+        # 악용되는 것을 막는다(M4). 실제 dispatch 는 여전히 config.address 를 따른다.
+        recipient = (getattr(user, "email", "") or "").strip()
+        if not recipient:
+            return False, "회원 이메일이 없어 테스트를 보낼 수 없습니다"
         return self._deliver(
             user,
             subject=f"[{BRAND}] 알림 채널 테스트 ✅",
             items=[_test_item()],
             intro="채널이 정상적으로 연결되었는지 확인하기 위한 테스트 메시지입니다.",
+            recipient=recipient,
         )
 
-    def _deliver(self, user, subject, items, intro):
+    def _deliver(self, user, subject, items, intro, recipient=None):
         # 지연 import: 발송 시점에만 메일 프레임워크를 끌어온다.
         from django.core.mail import EmailMultiAlternatives
 
-        recipient = self._recipient(user)
+        if recipient is None:
+            recipient = self._recipient(user)
         if not recipient:
             return False, "수신 이메일이 없습니다 (channel.config.address 와 user.email 모두 비어 있음)"
 
@@ -340,13 +351,20 @@ class SlackSender(BaseSender):
         except Exception as exc:  # noqa: BLE001 - 계약상 오류를 문자열로 반환
             return False, f"{type(exc).__name__}: {exc}"
 
+        # 업스트림(슬랙) 응답 본문은 로그에만 남기고, API 로 노출하는 error 는
+        # 일반화된 메시지만 반환한다(응답 본문 반사/정보 노출 방지).
         if response.status_code // 100 != 2:
-            body = (response.text or "")[:200]
-            return False, f"슬랙 응답 HTTP {response.status_code}: {body}"
+            logger.warning(
+                "슬랙 전송 실패 HTTP %s: %s",
+                response.status_code,
+                (response.text or "")[:500],
+            )
+            return False, f"슬랙 전송 실패 (HTTP {response.status_code})"
 
         body = (response.text or "").strip()
         if body and body != "ok":
-            return False, f"슬랙 응답 본문이 ok 가 아닙니다: {body[:200]}"
+            logger.warning("슬랙 응답 본문이 ok 가 아님: %s", body[:500])
+            return False, "슬랙 전송 실패 (예상치 못한 응답)"
         return True, ""
 
     def _build_payload(self, header, fallback, items, intro) -> dict:

@@ -4,6 +4,11 @@
 수집된 Notice 를, 그 출처를 구독한 사용자들의 관심 조건과 대조(LLM 또는 폴백)하여
 임계값 이상이면 InboxNotice 로 upsert 한다. `notified_at` 은 알림 계층 소유이므로
 절대 건드리지 않는다.
+
+AI 가 최종 권위(authoritative)다: 크롤러의 순진한 키워드 매처(crawler/matcher.py)가
+수집 시점에 남기는 플레이스홀더 행(`reason == "Keyword match"`, score 1.0)은 AI 가
+덮어쓴다(override). 반면 이미 AI 로 판정이 끝난 (공지,사용자) 쌍은 비용 절감을 위해
+`reclassify` 없이는 다시 호출하지 않는다(NFR-6).
 """
 from __future__ import annotations
 
@@ -22,12 +27,17 @@ from .llm import PROVIDER_LLM, LLMClient, get_client
 
 logger = logging.getLogger("ai")
 
+# crawler/matcher.py 가 크롤링 시점에 남기는 '순진한 키워드 매칭' 플레이스홀더의 reason.
+# 이 값을 가진 InboxNotice 행은 아직 AI 판정 전으로 보고 AI 가 덮어쓴다(생략하지 않는다).
+NAIVE_REASON = "Keyword match"
+
 # merge 시 합산할 카운터 필드(집계 전용 notices_processed 는 run 단에서 증가)
 _COUNTER_FIELDS = (
     "candidates",
     "created",
     "updated",
     "below_threshold",
+    "downgraded",
     "skipped_existing",
     "errors",
     "llm_calls",
@@ -42,9 +52,10 @@ class RunSummary:
     notices_processed: int = 0
     candidates: int = 0  # 실제 분류를 시도한 (공지,사용자) 쌍 수
     created: int = 0  # 새로 만든 InboxNotice
-    updated: int = 0  # 갱신한 InboxNotice
-    below_threshold: int = 0  # 임계값 미만이라 제외
-    skipped_existing: int = 0  # 이미 분류된 쌍이라 LLM 호출 생략(NFR-6)
+    updated: int = 0  # 갱신/덮어쓴 InboxNotice(순진한 매처 행 override 포함)
+    below_threshold: int = 0  # 임계값 미만이라 편입 제외
+    downgraded: int = 0  # 재판정에서 임계값 밑으로 떨어져 기존 행을 삭제한 수
+    skipped_existing: int = 0  # 이미 'AI' 로 분류된 쌍이라 LLM 호출 생략(NFR-6)
     errors: int = 0
     llm_calls: int = 0  # 실제 LLM 경로로 판정한 횟수
     fallback_calls: int = 0  # 키워드 폴백으로 판정한 횟수
@@ -71,6 +82,10 @@ class RunSummary:
 
 
 def _interest_payload(user) -> list[dict[str, object]]:
+    """사용자의 관심 조건을 우선순위 내림차순으로 반환.
+
+    Interest 모델에는 활성(active) 플래그가 없으므로 등록된 관심 조건 전량을 사용한다.
+    """
     interests = Interest.objects.filter(user_id=user).order_by(
         "-priority", "-created_at"
     )
@@ -94,9 +109,13 @@ def classify_notice(
 ) -> RunSummary:
     """한 공지를, 그 출처를 구독한 사용자들의 관심 조건과 대조해 inbox 를 채운다.
 
-    - 임계값 이상만 InboxNotice 로 upsert(update_or_create) → 멱등.
-    - 임계값 미만은 inbox 를 어지럽히지 않도록 건너뜀.
-    - 이미 분류된 (공지,사용자) 쌍은 `reclassify=False` 면 LLM 호출 없이 생략(NFR-6).
+    - 임계값 이상만 InboxNotice 로 upsert(update_or_create) → 멱등. 순진한 매처가 남긴
+      'Keyword match' 행이 있으면 실제 점수/사유/키워드로 덮어쓴다(AI 가 최종 권위).
+    - 임계값 미만이면, 기존 행이 있을 때 삭제(다운그레이드)하여 오래된 높은 점수를
+      남기지 않는다. 기존 행이 없으면 그냥 건너뛴다(inbox 를 어지럽히지 않음).
+    - 이미 'AI' 로 분류된 (공지,사용자) 쌍은 `reclassify=False` 면 LLM 호출 없이 생략
+      (NFR-6). 단, 순진한 'Keyword match' 행은 생략 대상이 아니라 재판정/덮어쓰기 대상.
+    - `notified_at` 은 절대 건드리지 않는다(알림 계층 소유).
     - 개별 사용자 처리 실패가 전체 실행을 중단시키지 않는다.
     """
 
@@ -110,24 +129,30 @@ def classify_notice(
         source_id_id=notice.source_id_id
     ).select_related("user_id")
 
-    already_classified: set[int] = set()
+    # (공지,사용자) 쌍은 유니크 → user_id 당 기존 reason 은 최대 1개.
+    # reason 으로 '진짜 AI 판정'(생략 대상)과 순진한 매처 플레이스홀더(덮어쓰기 대상)를 구분.
+    existing_reason_by_user: dict[int, str] = {}
     if not reclassify:
-        already_classified = set(
+        existing_reason_by_user = dict(
             InboxNotice.objects.filter(notice_id=notice).values_list(
-                "user_id", flat=True
+                "user_id", "reason"
             )
         )
 
     for subscription in subscriptions:
         user = subscription.user_id
-        if not reclassify and user.id in already_classified:
-            summary.skipped_existing += 1
-            continue
+        if not reclassify:
+            existing_reason = existing_reason_by_user.get(user.id)
+            if existing_reason is not None and existing_reason != NAIVE_REASON:
+                # 이미 'AI' 로 분류가 끝난 쌍 → 비용 절약을 위해 LLM 재호출 생략(NFR-6).
+                summary.skipped_existing += 1
+                continue
+            # 행이 없거나(None) 순진한 매처('Keyword match') 행이면 계속 진행해 덮어쓴다.
 
         try:
             interests = _interest_payload(user)
             if not interests:
-                # 활성 관심 조건이 없으면 매칭할 대상이 없다.
+                # 등록된 관심 조건이 없으면 매칭할 대상이 없다.
                 continue
 
             summary.candidates += 1
@@ -150,6 +175,15 @@ def classify_notice(
 
             if verdict.score < threshold:
                 summary.below_threshold += 1
+                if not dry_run:
+                    # 재판정/덮어쓰기에서 점수가 임계값 밑으로 내려갔는데 기존 행이 있으면
+                    # 오래된 높은 점수(순진한 매처 1.0 포함)를 남기지 않도록 행을 삭제한다.
+                    # notified_at 을 수정하는 게 아니라 행 자체를 제거한다.
+                    deleted, _ = InboxNotice.objects.filter(
+                        user_id=user, notice_id=notice
+                    ).delete()
+                    if deleted:
+                        summary.downgraded += 1
                 continue
 
             if dry_run:
@@ -162,6 +196,7 @@ def classify_notice(
                     summary.created += 1
                 continue
 
+            # update_or_create 는 notified_at 을 defaults 에 넣지 않으므로 절대 안 건드린다.
             _, created = InboxNotice.objects.update_or_create(
                 user_id=user,
                 notice_id=notice,
@@ -199,8 +234,11 @@ def run_classification(
 ) -> RunSummary:
     """후보 공지들을 순회하며 분류한다.
 
-    기본 후보군(NFR-6): 아직 아무에게도 분류되지 않은 공지만. `since` 를 주면 해당
-    시각 이후 생성 공지로 한정하고, `reclassify=True` 면 이미 분류된 쌍까지 다시 판정.
+    기본 후보군(NFR-6): 아직 'AI' 로 분류되지 않은 공지 — 행이 아예 없거나, 순진한
+    매처('Keyword match') 행만 있는 공지. 이렇게 하면 크롤러의 순진한 매칭이 공지를
+    선점(shadow)해 AI 선별을 막던 문제를 없애면서도, 이미 AI 가 끝낸 공지는 재호출하지
+    않는다. `since` 를 주면 해당 시각 이후 생성 공지로 한정하고, `reclassify=True` 면
+    이미 분류된 쌍까지 다시 판정한다.
     """
 
     client = client or get_client()
@@ -212,11 +250,19 @@ def run_classification(
     if since is not None:
         notices = notices.filter(created_at__gte=since)
     if not reclassify and since is None:
-        # 한 번도 분류된 적 없는 신규 공지만 (LLM 호출 최소화).
-        classified = InboxNotice.objects.values_list(
-            "notice_id", flat=True
-        ).distinct()
-        notices = notices.exclude(id__in=classified)
+        # 'AI' 로 이미 분류가 끝난 공지만 후보에서 제외한다.
+        # = 행이 있으면서 순진한 매처 플레이스홀더('Keyword match') 행이 하나도 없는 공지.
+        # 행이 없거나 순진한 매처 행이 남아 있으면 AI 가 덮어써야 하므로 후보로 남긴다.
+        naive_ids = set(
+            InboxNotice.objects.filter(reason=NAIVE_REASON).values_list(
+                "notice_id", flat=True
+            )
+        )
+        classified_ids = set(
+            InboxNotice.objects.values_list("notice_id", flat=True)
+        )
+        ai_done_ids = classified_ids - naive_ids
+        notices = notices.exclude(id__in=ai_done_ids)
     notices = notices.select_related("source_id").order_by("-created_at", "-id")
     if limit is not None:
         notices = notices[:limit]

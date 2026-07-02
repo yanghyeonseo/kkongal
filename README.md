@@ -43,6 +43,68 @@ kkongal/
     └── kkongal.pdf    # IR Deck (발표 자료)
 ```
 
+## 빠른 시작 (Quick Start)
+
+### 1) 백엔드 (Django)
+
+```bash
+cd backend
+uv venv --python 3.12 .venv          # 또는: python3.12 -m venv .venv
+uv pip install -r requirements.txt   # 또는: .venv/bin/pip install -r requirements.txt
+
+cp .env.example .env                 # 값 채우기 (아래 "환경 변수" 참고)
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py seed_demo # (선택) 데모 데이터 시드
+.venv/bin/python manage.py runserver # http://127.0.0.1:8000
+```
+
+### 2) 프론트엔드 (React + Vite)
+
+```bash
+cd frontend
+npm install
+npm run dev                          # http://localhost:3000 (→ /api 는 백엔드로 프록시)
+```
+
+> 개발 서버는 3000 포트에서 뜨고 `/api` 요청을 백엔드(127.0.0.1:8000)로 프록시하므로
+> JWT 쿠키가 same-origin(first-party)으로 처리됩니다. CORS·SameSite 설정이 필요 없습니다.
+
+### 3) AI 선별 → 알림 파이프라인 실행
+
+```bash
+# 개별 실행
+.venv/bin/python manage.py crawl_notices --no-match   # 공지 수집(순진한 매칭 끔)
+.venv/bin/python manage.py classify_notices           # AI 선별 → inbox_notice
+.venv/bin/python manage.py dispatch_alerts            # 이메일/슬랙 발송
+
+# 한 번에 (스케줄러/cron 용)
+.venv/bin/python manage.py run_pipeline --crawl       # 크롤 → 선별 → 발송
+```
+
+## AI 선별 · 멀티채널 알림
+
+이 저장소의 핵심 확장 기능입니다.
+
+- **AI 선별 (`backend/ai/`)** — 크롤링된 공지를, 구독 사용자의 관심 조건(키워드 + 자연어 설명)과
+  프로필을 근거로 **LLM이 의미 기준으로 판단**해 관련도(0~1)·매칭 키워드·선별 사유를 산출하고,
+  임계값 이상만 개인 피드(`inbox_notice`)에 편입합니다.
+  - **가성비 최상 기본값**: Google **Gemini 2.5 Flash‑Lite** (OpenAI 호환 엔드포인트, 무료 티어 존재).
+  - **제공자 교체 자유**: `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` 세 값만 바꾸면 OpenAI·DeepSeek·Groq 등으로 전환.
+  - **키 없이도 동작**: `LLM_API_KEY`가 비면 결정적 키워드 매칭으로 폴백 → 데모/CI/오프라인 안전.
+  - **비용 최소화(NFR‑6)**: 이미 분류된 공지는 재호출하지 않습니다.
+- **멀티채널 알림 (`backend/alert/`)** — 선별된 미발송 공지를 사용자의 활성 채널로 발송합니다.
+  - **이메일**: HTML+텍스트 본문. 기본 백엔드는 콘솔 출력이라 SMTP 없이도 데모됩니다.
+  - **슬랙**: Incoming Webhook(Block Kit). 사용자는 웹 UI의 **알림 설정**에서 Webhook URL을 등록합니다
+    (등록 방법은 입력란 옆 **? 도움말** 버튼 참고).
+  - **중복 방지**: `inbox_notice.notified_at` 으로 재발송을 막고, 채널별 결과는 `alert_logs` 에 기록합니다.
+  - **장애 격리(NFR‑3)**: 한 채널/사용자 실패가 전체 발송을 멈추지 않습니다.
+
+### 환경 변수
+
+모든 비밀 값은 `backend/.env` 로 관리하며 저장소에 커밋하지 않습니다(`.env.example` 참고).
+핵심 항목: `SECRET_KEY`, `LLM_API_KEY`(선택), `LLM_MODEL`, 이메일 SMTP(`EMAIL_*`), `FRONTEND_URL`.
+슬랙 Webhook은 서버 설정이 아니라 **사용자별로 웹 UI에서** 등록합니다.
+
 ## 팀
 
 | 이름   | GitHub                                           | 역할                                       |
