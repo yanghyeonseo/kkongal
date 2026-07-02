@@ -99,3 +99,12 @@ class AlertChannelTestResponseSerializer(serializers.Serializer):
 
     ok = serializers.BooleanField()
     error = serializers.CharField(allow_blank=True)
+
+
+class AlertChannelCreateResponseSerializer(AlertChannelSerializer):
+    """채널 생성 응답: 채널 정보 + 연동 확인 발송 결과(confirmation)."""
+
+    confirmation = AlertChannelTestResponseSerializer()
+
+    class Meta(AlertChannelSerializer.Meta):
+        fields = AlertChannelSerializer.Meta.fields + ("confirmation",)

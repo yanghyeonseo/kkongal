@@ -38,15 +38,15 @@ class SignUpView(APIView):
         responses={201: "JWT Token 발급", 400: "Bad Request"},
     )
     def post(self, request):
-        user_serializer = UserSerializer(data=request.data)
-        if user_serializer.is_valid(raise_exception=True):
-            user = user_serializer.save()
-            user.set_password(request.data.get("password"))
-            user.save()
+        # 검증(email 필수·형식·유니크 / username 유니크 / password 강도)은
+        # SignUpRequestSerializer 가 담당한다. 실패 시 raise_exception=True 로
+        # 400 필드 에러({"email": [...], "password": [...]})가 반환된다.
+        request_serializer = SignUpRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        user = request_serializer.save()
 
-            # token 추가 & cookie에 담기
-            return set_token_on_response_cookie(user, status_code=status.HTTP_201_CREATED)
-        return Response(user_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # token 추가 & cookie에 담기 (응답 user 에 onboarded=false 포함)
+        return set_token_on_response_cookie(user, status_code=status.HTTP_201_CREATED)
 
 class SignInView(APIView):
     @extend_schema(
@@ -165,6 +165,25 @@ class MeView(APIView):
 
         serializer = UserSerializer(user)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class OnboardingCompleteView(APIView):
+    @extend_schema(
+        summary="온보딩 완료",
+        description="현재 로그인 유저의 온보딩 상태를 완료(onboarded=True)로 표시합니다.",
+        request=None,
+        responses={200: UserSerializer, 401: "Unauthorized"},
+    )
+    def post(self, request):
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        user.onboarded = True
+        user.save(update_fields=["onboarded"])
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
 class InterestListView(APIView):

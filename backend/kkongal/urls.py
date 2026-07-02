@@ -19,12 +19,14 @@ from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from account.urls import interest_urlpatterns
 from notices.urls import ai_urlpatterns
+from sources.urls import sources_urlpatterns
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/account/', include('account.urls')),
     path('api/interests/', include((interest_urlpatterns, 'interests'))),
     path('api/subscriptions/', include('sources.urls')),
+    path('api/sources/', include(sources_urlpatterns)),
     path('api/notices/', include('notices.urls')),
     path('api/ai/', include((ai_urlpatterns, 'ai'))),
     path('api/', include('alert.urls')),

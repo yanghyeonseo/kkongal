@@ -79,6 +79,9 @@ class Command(BaseCommand):
         # keep email in sync so alerts have a destination
         user.email = opts["email"]
         user.job = user.job or "소프트웨어 개발자"
+        # demo user has already "onboarded" so login lands on the dashboard, not the wizard
+        if hasattr(user, "onboarded"):
+            user.onboarded = True
         user.save()
         self.stdout.write(self.style.SUCCESS(
             f"user: {user.username} <{user.email}> ({'created' if created else 'exists'})"

@@ -443,6 +443,91 @@ class TestSendEndpointTests(AlertTestBase):
         self.assertEqual(response.status_code, 401)
 
 
+@override_settings(EMAIL_BACKEND=LOCMEM_EMAIL)
+class ChannelCreateConfirmationTests(AlertTestBase):
+    """채널 생성 시 연동 확인 메시지 발송 (locmem 이메일 / httpx 목)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    URL = "/api/alert-channels/"
+
+    def test_email_channel_create_sends_confirmation_to_config_address(self):
+        response = self.client.post(
+            self.URL,
+            {"type": "email", "config": {"address": "dest@example.com"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["confirmation"]["ok"])
+        self.assertEqual(response.data["confirmation"]["error"], "")
+        # 이메일 확인은 채널에 설정된 주소로 발송된다.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["dest@example.com"])
+        self.assertIn("연동", mail.outbox[0].subject)
+        # 채널이 실제로 생성됨.
+        self.assertTrue(AlertChannel.objects.filter(id=response.data["id"]).exists())
+        # 연동 확인은 실제 알림이 아니므로 AlertLog 를 남기지 않는다.
+        self.assertEqual(AlertLog.objects.count(), 0)
+
+    def test_email_confirmation_falls_back_to_member_email(self):
+        response = self.client.post(
+            self.URL,
+            {"type": "email", "config": {}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["confirmation"]["ok"])
+        self.assertEqual(len(mail.outbox), 1)
+        # config.address 가 없으면 회원 이메일로 폴백.
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    @mock.patch("alert.senders.httpx.post")
+    def test_slack_channel_create_sends_confirmation(self, mock_post):
+        mock_post.return_value = make_slack_response(200, "ok")
+
+        response = self.client.post(
+            self.URL,
+            {
+                "type": "slack",
+                "config": {"webhook_url": "https://hooks.slack.com/services/A/B/C"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["confirmation"]["ok"])
+        mock_post.assert_called_once()
+        self.assertEqual(
+            mock_post.call_args.args[0], "https://hooks.slack.com/services/A/B/C"
+        )
+
+    @mock.patch("alert.senders.httpx.post")
+    def test_confirmation_failure_does_not_block_creation(self, mock_post):
+        # 슬랙 발송이 예외로 실패해도 채널 생성은 성공해야 한다.
+        mock_post.side_effect = httpx.ConnectError("boom")
+
+        response = self.client.post(
+            self.URL,
+            {
+                "type": "slack",
+                "config": {"webhook_url": "https://hooks.slack.com/services/X/Y/Z"},
+            },
+            format="json",
+        )
+
+        # 채널은 여전히 201 로 생성되고, confirmation.ok 만 False.
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data.get("id"))
+        self.assertFalse(response.data["confirmation"]["ok"])
+        self.assertTrue(response.data["confirmation"]["error"])
+        self.assertTrue(AlertChannel.objects.filter(id=response.data["id"]).exists())
+
+
 class AlertChannelSerializerValidationTests(TestCase):
     """H3: 채널 config 검증 (슬랙 webhook SSRF 방어 + 이메일 주소 유효성)."""
 

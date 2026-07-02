@@ -7,6 +7,7 @@ class User(AbstractUser):
     age = models.IntegerField(null=True, blank=True)
     job = models.CharField(max_length=128, blank=True)
     gender = models.CharField(max_length=32, blank=True)
+    onboarded = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):

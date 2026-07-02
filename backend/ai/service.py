@@ -99,6 +99,102 @@ def _interest_payload(user) -> list[dict[str, object]]:
     ]
 
 
+def _classify_pair(
+    notice: Notice,
+    user,
+    *,
+    client: LLMClient,
+    threshold: float,
+    reclassify: bool,
+    dry_run: bool,
+    existing_reason: Optional[str],
+    summary: RunSummary,
+) -> None:
+    """(공지, 사용자) 한 쌍을 판정해 ``summary`` 를 갱신한다(inbox upsert/삭제 포함).
+
+    ``classify_notice`` 와 ``classify_notices_for_user`` 가 공유하는 단일 판정 단위.
+    동작 규칙은 ``classify_notice`` 문서와 동일하다:
+    - 이미 'AI' 로 분류된 쌍은 ``reclassify=False`` 면 LLM 호출 없이 생략(NFR-6).
+      순진한 매처('Keyword match') 행은 생략 대상이 아니라 덮어쓰기 대상.
+    - 임계값 이상만 upsert(멱등), 미만이면 기존 행 삭제(다운그레이드).
+    - ``notified_at`` 은 절대 건드리지 않는다.
+    - 개별 실패는 삼켜서 ``summary.errors`` 로만 집계한다(상위 루프 비중단).
+
+    ``existing_reason`` 은 ``reclassify=False`` 일 때 이 쌍의 기존 InboxNotice.reason
+    (없으면 None). ``reclassify=True`` 면 무시된다.
+    """
+
+    if not reclassify and existing_reason is not None and existing_reason != NAIVE_REASON:
+        # 이미 'AI' 로 분류가 끝난 쌍 → 비용 절약을 위해 LLM 재호출 생략(NFR-6).
+        summary.skipped_existing += 1
+        return
+
+    try:
+        interests = _interest_payload(user)
+        if not interests:
+            # 등록된 관심 조건이 없으면 매칭할 대상이 없다.
+            return
+
+        summary.candidates += 1
+        verdict = client.classify(
+            title=notice.title,
+            content=notice.content,
+            publisher=notice.publisher,
+            profile={
+                "age": user.age,
+                "job": user.job,
+                "gender": user.gender,
+            },
+            interests=interests,
+        )
+
+        if verdict.provider == PROVIDER_LLM:
+            summary.llm_calls += 1
+        else:
+            summary.fallback_calls += 1
+
+        if verdict.score < threshold:
+            summary.below_threshold += 1
+            if not dry_run:
+                # 임계값 밑으로 내려갔는데 기존 행이 있으면 오래된 높은 점수(순진한
+                # 매처 1.0 포함)를 남기지 않도록 행을 삭제한다. notified_at 을 수정하는
+                # 게 아니라 행 자체를 제거한다.
+                deleted, _ = InboxNotice.objects.filter(
+                    user_id=user, notice_id=notice
+                ).delete()
+                if deleted:
+                    summary.downgraded += 1
+            return
+
+        if dry_run:
+            exists = InboxNotice.objects.filter(
+                user_id=user, notice_id=notice
+            ).exists()
+            if exists:
+                summary.updated += 1
+            else:
+                summary.created += 1
+            return
+
+        # update_or_create 는 notified_at 을 defaults 에 넣지 않으므로 절대 안 건드린다.
+        _, created = InboxNotice.objects.update_or_create(
+            user_id=user,
+            notice_id=notice,
+            defaults={
+                "relevance_score": verdict.score,
+                "matched_keywords": ", ".join(verdict.matched_keywords),
+                "reason": verdict.reason,
+            },
+        )
+        if created:
+            summary.created += 1
+        else:
+            summary.updated += 1
+    except Exception:  # 한 사용자 실패가 전체를 막지 않도록
+        logger.exception("분류 실패 (notice=%s, user=%s)", notice.id, user.id)
+        summary.errors += 1
+
+
 def classify_notice(
     notice: Notice,
     *,
@@ -141,80 +237,18 @@ def classify_notice(
 
     for subscription in subscriptions:
         user = subscription.user_id
-        if not reclassify:
-            existing_reason = existing_reason_by_user.get(user.id)
-            if existing_reason is not None and existing_reason != NAIVE_REASON:
-                # 이미 'AI' 로 분류가 끝난 쌍 → 비용 절약을 위해 LLM 재호출 생략(NFR-6).
-                summary.skipped_existing += 1
-                continue
-            # 행이 없거나(None) 순진한 매처('Keyword match') 행이면 계속 진행해 덮어쓴다.
-
-        try:
-            interests = _interest_payload(user)
-            if not interests:
-                # 등록된 관심 조건이 없으면 매칭할 대상이 없다.
-                continue
-
-            summary.candidates += 1
-            verdict = client.classify(
-                title=notice.title,
-                content=notice.content,
-                publisher=notice.publisher,
-                profile={
-                    "age": user.age,
-                    "job": user.job,
-                    "gender": user.gender,
-                },
-                interests=interests,
-            )
-
-            if verdict.provider == PROVIDER_LLM:
-                summary.llm_calls += 1
-            else:
-                summary.fallback_calls += 1
-
-            if verdict.score < threshold:
-                summary.below_threshold += 1
-                if not dry_run:
-                    # 재판정/덮어쓰기에서 점수가 임계값 밑으로 내려갔는데 기존 행이 있으면
-                    # 오래된 높은 점수(순진한 매처 1.0 포함)를 남기지 않도록 행을 삭제한다.
-                    # notified_at 을 수정하는 게 아니라 행 자체를 제거한다.
-                    deleted, _ = InboxNotice.objects.filter(
-                        user_id=user, notice_id=notice
-                    ).delete()
-                    if deleted:
-                        summary.downgraded += 1
-                continue
-
-            if dry_run:
-                exists = InboxNotice.objects.filter(
-                    user_id=user, notice_id=notice
-                ).exists()
-                if exists:
-                    summary.updated += 1
-                else:
-                    summary.created += 1
-                continue
-
-            # update_or_create 는 notified_at 을 defaults 에 넣지 않으므로 절대 안 건드린다.
-            _, created = InboxNotice.objects.update_or_create(
-                user_id=user,
-                notice_id=notice,
-                defaults={
-                    "relevance_score": verdict.score,
-                    "matched_keywords": ", ".join(verdict.matched_keywords),
-                    "reason": verdict.reason,
-                },
-            )
-            if created:
-                summary.created += 1
-            else:
-                summary.updated += 1
-        except Exception:  # 한 사용자 실패가 전체를 막지 않도록
-            logger.exception(
-                "분류 실패 (notice=%s, user=%s)", notice.id, user.id
-            )
-            summary.errors += 1
+        # 행이 없거나(None) 순진한 매처('Keyword match') 행이면 _classify_pair 가
+        # 계속 진행해 덮어쓴다. 이미 'AI' 로 분류된 쌍이면 생략(NFR-6).
+        _classify_pair(
+            notice,
+            user,
+            client=client,
+            threshold=threshold,
+            reclassify=reclassify,
+            dry_run=dry_run,
+            existing_reason=existing_reason_by_user.get(user.id),
+            summary=summary,
+        )
 
     logger.debug(
         "classify_notice(notice=%s): %s", notice.id, summary.as_dict()
@@ -289,3 +323,61 @@ def run_classification(
         total.provider,
     )
     return total
+
+
+def classify_notices_for_user(
+    user,
+    notices,
+    *,
+    reclassify: bool = False,
+    threshold: Optional[float] = None,
+    dry_run: bool = False,
+    client: Optional[LLMClient] = None,
+) -> dict[str, object]:
+    """주어진 공지들을 **한 명의 사용자**에 대해서만 선별한다(온디맨드 동기화용).
+
+    ``run_classification`` 이 (공지 → 그 출처의 모든 구독자) 를 도는 것과 달리, 이 헬퍼는
+    (주어진 공지들 → 이 사용자 하나) 만 판정한다. 덕분에 사이트별 '동기화' 버튼처럼
+    요청 사용자·소수 공지(≤10)만 처리해 LLM 비용을 최소화한다.
+
+    - 임계값 이상만 InboxNotice 로 upsert(멱등), 미만이면 기존 행 삭제(다운그레이드).
+    - 이미 'AI' 로 분류된 (공지,이 사용자) 쌍은 ``reclassify=False`` 면 생략(NFR-6).
+    - ``notified_at`` 은 절대 건드리지 않는다(알림 계층 소유).
+    - 다른 사용자의 InboxNotice 는 절대 만들지/건드리지 않는다.
+
+    반환: ``RunSummary.as_dict()`` (created 가 '새로 담긴 추천' 수).
+    """
+
+    client = client or get_client()
+    threshold = (
+        settings.LLM_RELEVANCE_THRESHOLD if threshold is None else threshold
+    )
+    total = RunSummary()
+    notices = list(notices)
+
+    # 이 사용자에 한해, 대상 공지들의 기존 판정 사유를 한 번에 읽어 NFR-6 생략에 쓴다.
+    existing_reason_by_notice: dict[int, str] = {}
+    if not reclassify and notices:
+        existing_reason_by_notice = dict(
+            InboxNotice.objects.filter(
+                user_id=user, notice_id__in=[n.id for n in notices]
+            ).values_list("notice_id", "reason")
+        )
+
+    for notice in notices:
+        _classify_pair(
+            notice,
+            user,
+            client=client,
+            threshold=threshold,
+            reclassify=reclassify,
+            dry_run=dry_run,
+            existing_reason=existing_reason_by_notice.get(notice.id),
+            summary=total,
+        )
+        total.notices_processed += 1
+
+    logger.info(
+        "classify_notices_for_user(user=%s): %s", user.id, total.as_dict()
+    )
+    return total.as_dict()

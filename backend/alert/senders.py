@@ -75,6 +75,19 @@ def _test_item() -> AlertItem:
     )
 
 
+def _connected_item() -> AlertItem:
+    """채널 생성 직후 보내는 연동 확인 항목."""
+
+    return AlertItem(
+        title="꽁알꽁알 알림이 연동되었어요! 🎉",
+        source=BRAND,
+        reason="이제 맞춤 공지를 이 채널로 보내드릴게요. 관심 키워드와 사이트를 설정하면 딱 맞는 공지만 골라 알려드려요!",
+        keywords="",
+        url=settings.FRONTEND_URL,
+        score=None,
+    )
+
+
 def _format_keywords(raw) -> list[str]:
     """저장된 matched_keywords(콤마 조인 문자열/JSON 배열/리스트)를 키워드 목록으로."""
 
@@ -120,6 +133,10 @@ class BaseSender:
     def send_test(self, user) -> tuple[bool, str]:
         raise NotImplementedError
 
+    def send_connected(self, user) -> tuple[bool, str]:
+        """채널 생성 직후 발송하는 '연동 확인' 메시지."""
+        raise NotImplementedError
+
 
 class EmailSender(BaseSender):
     """Django 메일 프레임워크(``EmailMultiAlternatives``)로 HTML+평문 메일 발송.
@@ -157,6 +174,16 @@ class EmailSender(BaseSender):
             items=[_test_item()],
             intro="채널이 정상적으로 연결되었는지 확인하기 위한 테스트 메시지입니다.",
             recipient=recipient,
+        )
+
+    def send_connected(self, user):
+        # 연동 확인 메일은 실제 알림이 갈 주소(config.address → 없으면 user.email)로
+        # 보낸다. 사용자가 이 채널로 지정한 주소가 잘 도착하는지 확인시켜 주기 위함.
+        return self._deliver(
+            user,
+            subject=f"[{BRAND}] 알림이 연동되었어요 🎉",
+            items=[_connected_item()],
+            intro="꽁알꽁알 알림이 이 채널로 연동되었어요! 이제 맞춤 공지를 여기로 보내드릴게요.",
         )
 
     def _deliver(self, user, subject, items, intro, recipient=None):
@@ -331,6 +358,14 @@ class SlackSender(BaseSender):
             intro="채널이 정상적으로 연결되었는지 확인하기 위한 테스트 메시지입니다.",
         )
 
+    def send_connected(self, user):
+        return self._deliver(
+            header=f"🐣 {BRAND} · 알림이 연동되었어요 🎉",
+            fallback="꽁알꽁알 알림이 이 채널로 연동되었어요!",
+            items=[_connected_item()],
+            intro="이제 맞춤 공지를 이 채널로 보내드릴게요. 관심 키워드와 사이트를 설정해 보세요!",
+        )
+
     def _fallback_text(self, items) -> str:
         if len(items) == 1:
             return f"[{BRAND}] {items[0].title}"
@@ -443,3 +478,23 @@ def get_sender(channel) -> BaseSender | None:
     if sender_cls is None:
         return None
     return sender_cls(channel)
+
+
+def send_channel_connected(channel, user) -> tuple[bool, str]:
+    """채널 생성 직후 '연동 확인' 메시지를 발송한다.
+
+    반환 계약은 ``(ok, error)`` 이며 절대 예외를 던지지 않는다 — 확인 메시지
+    발송 실패가 채널 생성을 막아서는 안 되기 때문이다(호출부는 이 결과를 201
+    응답의 ``confirmation`` 에 담기만 한다).
+    """
+
+    sender = get_sender(channel)
+    if sender is None:
+        return False, f"지원하지 않는 채널 타입: {channel.type}"
+    try:
+        return sender.send_connected(user)
+    except Exception as exc:  # noqa: BLE001 - 채널 생성을 막지 않도록 방어
+        logger.exception(
+            "연동 확인 발송 실패 (채널=%s, 타입=%s)", channel.id, channel.type
+        )
+        return False, f"{type(exc).__name__}: {exc}"

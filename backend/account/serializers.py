@@ -24,10 +24,13 @@ class UserSerializer(serializers.ModelSerializer):
             "age",
             "job",
             "gender",
+            "onboarded",
             "created_at",
         )
         extra_kwargs = {
             "password": {"write_only": True},
+            # onboarded 는 온보딩 완료 엔드포인트에서만 갱신한다(가입/수정 입력으로는 못 바꿈).
+            "onboarded": {"read_only": True},
         }
 
 

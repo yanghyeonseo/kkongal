@@ -5,8 +5,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AlertChannel, AlertLog
-from .senders import get_sender
+from .senders import get_sender, send_channel_connected
 from .serializers import (
+    AlertChannelCreateResponseSerializer,
     AlertChannelSerializer,
     AlertChannelTestResponseSerializer,
     AlertLogSerializer,
@@ -32,10 +33,14 @@ class AlertChannelListView(APIView):
 
     @extend_schema(
         summary="알림 채널 생성",
-        description="로그인한 사용자의 알림 채널 설정을 생성합니다.",
+        description=(
+            "로그인한 사용자의 알림 채널 설정을 생성합니다. 생성 직후 해당 채널로 "
+            "연동 확인 메시지를 발송하며, 그 결과를 응답의 confirmation(ok/error) 에 "
+            "담아 반환합니다. 확인 메시지 발송이 실패해도 채널 생성은 성공합니다."
+        ),
         request=AlertChannelSerializer,
         responses={
-            201: AlertChannelSerializer,
+            201: AlertChannelCreateResponseSerializer,
             400: "Bad Request",
             401: "Unauthorized",
         },
@@ -50,10 +55,12 @@ class AlertChannelListView(APIView):
         serializer = AlertChannelSerializer(data=request.data)
         if serializer.is_valid(raise_exception=True):
             channel = serializer.save(user_id=author)
-            return Response(
-                AlertChannelSerializer(channel).data,
-                status=status.HTTP_201_CREATED,
-            )
+            # 채널이 저장된 뒤 연동 확인 메시지를 보낸다. 발송이 실패해도 채널
+            # 생성은 성공이며, 결과는 confirmation 으로만 함께 내려준다.
+            ok, error = send_channel_connected(channel, author)
+            data = AlertChannelSerializer(channel).data
+            data["confirmation"] = {"ok": ok, "error": error}
+            return Response(data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
