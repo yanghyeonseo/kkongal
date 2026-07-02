@@ -195,7 +195,8 @@ LLM_BASE_URL = env(
     'LLM_BASE_URL',
     default='https://generativelanguage.googleapis.com/v1beta/openai',
 )
-LLM_MODEL = env('LLM_MODEL', default='gemini-2.0-flash')
+# gemini-2.5-flash-lite: Google 최저가 · 분류/라우팅 특화(가성비 최상). 무료 티어 존재.
+LLM_MODEL = env('LLM_MODEL', default='gemini-2.5-flash-lite')
 LLM_TIMEOUT_SECONDS = env.float('LLM_TIMEOUT_SECONDS', default=30.0)
 LLM_MAX_CONTENT_CHARS = env.int('LLM_MAX_CONTENT_CHARS', default=2000)
 # inbox 편입 및 알림 대상이 되는 최소 관련도(0.0~1.0)

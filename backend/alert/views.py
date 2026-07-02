@@ -5,7 +5,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AlertChannel, AlertLog
-from .serializers import AlertChannelSerializer, AlertLogSerializer
+from .senders import get_sender
+from .serializers import (
+    AlertChannelSerializer,
+    AlertChannelTestResponseSerializer,
+    AlertLogSerializer,
+)
 
 
 class AlertChannelListView(APIView):
@@ -159,3 +164,39 @@ class AlertLogListView(APIView):
 
         serializer = AlertLogSerializer(logs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AlertChannelTestView(APIView):
+    @extend_schema(
+        summary="알림 채널 테스트 발송",
+        description=(
+            "지정한 알림 채널로 친근한 테스트 메시지를 즉시 발송해 연결 상태를 "
+            "확인합니다. 실제 공지가 아닌 테스트이므로 AlertLog 는 남기지 않습니다. "
+            "응답의 ok 로 성공 여부를, error 로 실패 사유를 확인합니다."
+        ),
+        request=None,
+        responses={
+            200: AlertChannelTestResponseSerializer,
+            401: "Unauthorized",
+            404: "Not Found",
+        },
+    )
+    def post(self, request, channel_id):
+        author = request.user
+        if not author.is_authenticated:
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # 소유하지 않은 채널이면 404 (다른 alert 뷰와 동일한 패턴).
+        channel = get_object_or_404(AlertChannel, id=channel_id, user_id=author)
+
+        sender = get_sender(channel)
+        if sender is None:
+            return Response(
+                {"ok": False, "error": f"지원하지 않는 채널 타입: {channel.type}"},
+                status=status.HTTP_200_OK,
+            )
+
+        ok, error = sender.send_test(author)
+        return Response({"ok": ok, "error": error}, status=status.HTTP_200_OK)

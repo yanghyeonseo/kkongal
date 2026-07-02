@@ -40,3 +40,10 @@ class AlertLogSerializer(serializers.ModelSerializer):
             "sent_at",
         )
         read_only_fields = fields
+
+
+class AlertChannelTestResponseSerializer(serializers.Serializer):
+    """테스트 발송 결과. ok=성공 여부, error=실패 시 사유(성공이면 빈 문자열)."""
+
+    ok = serializers.BooleanField()
+    error = serializers.CharField(allow_blank=True)
