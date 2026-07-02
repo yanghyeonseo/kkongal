@@ -1,25 +1,26 @@
 import { apiRequest } from "./client.js";
 
 const USER_STORAGE_KEY = "kkongal_user";
-const USE_MOCK = true;
 
+// 백엔드 UserSerializer 응답을 프론트에서 쓰는 형태로 정규화한다.
+// 백엔드는 username 으로 인증하고 email 은 알림용으로 따로 저장한다.
+// 표시용 이름(name)은 username 을 사용한다(별도 name 필드가 없음).
 function normalizeUser(data, fallback = {}) {
-  const user = data?.user ?? data?.data?.user ?? data ?? {};
+  const user = data ?? {};
 
   const name =
-    user.name ??
     user.username ??
-    fallback.name ??
     fallback.username ??
-    fallback.email?.split("@")[0] ??
+    fallback.name ??
+    user.email?.split("@")[0] ??
     "사용자";
 
   return {
     id: user.id ?? fallback.id ?? null,
-    email: user.email ?? fallback.email ?? "",
+    username: user.username ?? fallback.username ?? name,
     name,
-    username: user.username ?? name,
-    age: user.age ?? 0,
+    email: user.email ?? fallback.email ?? "",
+    age: user.age ?? null,
     job: user.job ?? "",
     gender: user.gender ?? "",
   };
@@ -27,7 +28,6 @@ function normalizeUser(data, fallback = {}) {
 
 export function getStoredUser() {
   const savedUser = localStorage.getItem(USER_STORAGE_KEY);
-
   if (!savedUser) return null;
 
   try {
@@ -45,75 +45,52 @@ export function clearStoredUser() {
   localStorage.removeItem(USER_STORAGE_KEY);
 }
 
+// 쿠키의 access_token 기준으로 현재 로그인 사용자를 조회한다.
 export async function getCurrentUser() {
-  if (USE_MOCK) {
-    return {
-      id: 1,
-      name: "김현서",
-      username: "김현서",
-      email: "test@example.com",
-    };
-  }
-
   const data = await apiRequest("/api/account/me/");
   return normalizeUser(data);
 }
 
-export async function signup({ name, email, password }) {
-  if (USE_MOCK) {
-    return {
-      id: Date.now(),
-      name,
-      username: name,
-      email,
-    };
+// 회원가입: username + password 는 필수, email 은 알림에 필요, 나머지는 선택.
+export async function signup({
+  username,
+  email,
+  password,
+  age = null,
+  job = "",
+  gender = "",
+}) {
+  const body = { username, email, password };
+
+  // 선택 프로필(AI 추천 정확도 향상용)은 값이 있을 때만 전송
+  if (age !== null && age !== "" && !Number.isNaN(Number(age))) {
+    body.age = Number(age);
   }
+  if (job) body.job = job;
+  if (gender) body.gender = gender;
 
   const data = await apiRequest("/api/account/signup/", {
     method: "POST",
-    body: JSON.stringify({
-      email,
-      password,
-      username: name,
-      age: 0,
-      job: "",
-      gender: "",
-    }),
+    body: JSON.stringify(body),
   });
 
-  return normalizeUser(data, { name, email });
+  return normalizeUser(data, { username, email });
 }
 
-export async function login({ email, password }) {
-  if (USE_MOCK) {
-    return {
-      id: 1,
-      name: email.split("@")[0] || "김현서",
-      username: email.split("@")[0] || "김현서",
-      email,
-    };
-  }
-
+// 로그인: 백엔드는 username 으로 인증한다.
+export async function login({ username, password }) {
   const data = await apiRequest("/api/account/signin/", {
     method: "POST",
-    body: JSON.stringify({
-      username: email,
-      password,
-    }),
+    body: JSON.stringify({ username, password }),
   });
 
-  return normalizeUser(data, { email });
+  return normalizeUser(data, { username });
 }
 
 export async function logout() {
-  if (USE_MOCK) {
-    return;
-  }
-
+  // refresh_token 은 쿠키로 전달된다(백엔드가 쿠키 우선으로 읽음).
   await apiRequest("/api/account/logout/", {
     method: "POST",
-    body: JSON.stringify({
-      refresh: "",
-    }),
+    body: JSON.stringify({}),
   });
 }

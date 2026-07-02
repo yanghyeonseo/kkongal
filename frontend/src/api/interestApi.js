@@ -1,40 +1,40 @@
-import { mockInterests } from "../data/mockInterests.js";
+import { apiRequest } from "./client.js";
 
-const USE_MOCK = true;
-
-export async function getMyInterests() {
-  if (USE_MOCK) {
-    return mockInterests;
-  }
-
-  const response = await fetch("http://127.0.0.1:8000/api/interests/", {
-    credentials: "include",
-  });
-
-  if (!response.ok) {
-    throw new Error("관심사 목록을 불러오지 못했습니다.");
-  }
-
-  return response.json();
+// 백엔드 InterestSerializer: { id, user_id, keyword, description, priority, created_at }
+function normalizeInterest(item) {
+  return {
+    id: item.id,
+    keyword: item.keyword ?? "",
+    description: item.description ?? "",
+    priority: item.priority ?? 0,
+  };
 }
 
-export async function updateMyInterests(interests) {
-  if (USE_MOCK) {
-    return interests;
-  }
+export async function getMyInterests() {
+  const data = await apiRequest("/api/interests/");
+  return Array.isArray(data) ? data.map(normalizeInterest) : [];
+}
 
-  const response = await fetch("http://127.0.0.1:8000/api/interests/", {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ interests }),
+// 관심사는 항목 단위 CRUD (bulk PUT 없음).
+export async function createInterest({ keyword, description = "", priority = 0 }) {
+  const data = await apiRequest("/api/interests/", {
+    method: "POST",
+    body: JSON.stringify({ keyword, description, priority }),
   });
+  return normalizeInterest(data);
+}
 
-  if (!response.ok) {
-    throw new Error("관심사 저장에 실패했습니다.");
-  }
+export async function updateInterest(
+  interestId,
+  { keyword, description = "", priority = 0 },
+) {
+  const data = await apiRequest(`/api/interests/${interestId}/`, {
+    method: "PUT",
+    body: JSON.stringify({ keyword, description, priority }),
+  });
+  return normalizeInterest(data);
+}
 
-  return response.json();
+export async function deleteInterest(interestId) {
+  return apiRequest(`/api/interests/${interestId}/`, { method: "DELETE" });
 }

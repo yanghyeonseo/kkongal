@@ -1,15 +1,33 @@
 import { apiRequest } from "./client.js";
-import { mockInboxNotices } from "../data/mockInboxNotices.js";
 
-const USE_MOCK = true;
+function displayNameFromUrl(url) {
+  if (!url) return "공지 사이트";
+  try {
+    const { hostname } = new URL(url);
+    return hostname.replace(/^www\./, "");
+  } catch {
+    return "공지 사이트";
+  }
+}
 
+// matched_keywords 는 계약상 콤마-join 문자열이지만, JSON 배열 문자열이 올 수도 있어 방어적으로 파싱.
 function parseMatchedKeywords(value) {
   if (!value) return [];
-
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
 
   if (typeof value === "string") {
-    return value
+    const trimmed = value.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((v) => String(v).trim()).filter(Boolean);
+        }
+      } catch {
+        // fallthrough → 콤마 분리
+      }
+    }
+    return trimmed
       .split(",")
       .map((keyword) => keyword.trim())
       .filter(Boolean);
@@ -28,7 +46,6 @@ function getIsDeadlineSoon(deadlineAt) {
   deadline.setHours(0, 0, 0, 0);
 
   const diffDays = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
-
   return diffDays >= 0 && diffDays <= 7;
 }
 
@@ -37,27 +54,27 @@ function normalizeInboxNotice(item) {
   const source = notice.source || {};
 
   const deadlineAt = item.deadline_at ?? notice.deadline_at ?? null;
+  const sourceName =
+    (source.name && source.name.trim()) || displayNameFromUrl(notice.url);
 
   return {
     inboxNoticeId: item.id,
     noticeId: item.notice_id ?? notice.id,
 
     sourceId: notice.source_id ?? source.id,
-    sourceName: source.name ?? "",
-    sourceDisplayName: source.name ?? "공지 사이트",
-
-    category: "etc",
+    sourceName,
+    sourceDisplayName: sourceName,
 
     title: notice.title ?? "",
-    description: notice.content?.slice(0, 80) ?? "",
+    description: (notice.content ?? "").slice(0, 90),
     url: notice.url ?? "",
+    publisher: notice.publisher ?? "",
 
     publishedAt: notice.published_at ?? null,
     deadlineAt,
 
     relevanceScore: Number(item.relevance_score ?? 0),
     matchedInterestTags: parseMatchedKeywords(item.matched_keywords),
-
     reason: item.reason ?? "",
 
     isRead: item.is_read ?? false,
@@ -66,35 +83,16 @@ function normalizeInboxNotice(item) {
   };
 }
 
-export async function getMyInboxNotices({ saved = false } = {}) {
-  if (USE_MOCK) {
-    if (saved) {
-      return mockInboxNotices.filter((notice) => notice.isSaved);
-    }
-
-    return mockInboxNotices;
-  }
-
-  const query = saved ? "?saved=true" : "";
+export async function getMyInboxNotices({ saved } = {}) {
+  const query = saved === true ? "?saved=true" : saved === false ? "?saved=false" : "";
   const data = await apiRequest(`/api/notices/inbox/${query}`);
-
-  return data.map(normalizeInboxNotice);
+  return Array.isArray(data) ? data.map(normalizeInboxNotice) : [];
 }
 
 export async function toggleInboxNoticeSave(inboxNoticeId, isSaved) {
-  if (USE_MOCK) {
-    return {
-      id: inboxNoticeId,
-      is_saved: isSaved,
-    };
-  }
-
   const data = await apiRequest(`/api/notices/inbox/${inboxNoticeId}/save/`, {
     method: "PATCH",
-    body: JSON.stringify({
-      is_saved: isSaved,
-    }),
+    body: JSON.stringify({ is_saved: isSaved }),
   });
-
   return normalizeInboxNotice(data);
 }

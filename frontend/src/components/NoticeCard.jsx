@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Zap, Bookmark } from "lucide-react";
+import { Sparkles, Bookmark, ChevronDown, ExternalLink } from "lucide-react";
 import { formatRelativeTime, isToday, calculateDday } from "../utils/date.js";
+import { isAiMatched, formatRelevance, relevanceTier } from "../utils/relevance.js";
 
 const LOGO_COLORS = [
   "#1677f2",
@@ -17,11 +18,9 @@ function getLogoColor(sourceName) {
   if (!sourceName) return LOGO_COLORS[0];
 
   let hash = 0;
-
   for (let i = 0; i < sourceName.length; i += 1) {
     hash += sourceName.charCodeAt(i);
   }
-
   return LOGO_COLORS[hash % LOGO_COLORS.length];
 }
 
@@ -30,10 +29,9 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
 
   const isTodayNotice = isToday(notice.publishedAt);
   const dDay = calculateDday(notice.deadlineAt);
-
-  const isAiMatched =
-    notice.relevanceScore >= 0.8 ||
-    (notice.matchedInterestTags && notice.matchedInterestTags.length > 0);
+  const aiMatched = isAiMatched(notice);
+  const tier = relevanceTier(notice.relevanceScore);
+  const scorePercent = Math.round((Number(notice.relevanceScore) || 0) * 100);
 
   const handleToggleAiReason = (event) => {
     event.stopPropagation();
@@ -54,9 +52,8 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
       <div className="noticeTop">
         <div
           className="noticeLogo"
-          style={{
-            backgroundColor: getLogoColor(notice.sourceDisplayName),
-          }}
+          style={{ backgroundColor: getLogoColor(notice.sourceDisplayName) }}
+          aria-hidden="true"
         >
           {notice.sourceDisplayName.slice(0, 1)}
         </div>
@@ -69,19 +66,27 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
             onClick={() => onOpenNotice(notice)}
           >
             {notice.title}
+            <ExternalLink size={14} className="titleExternalIcon" aria-hidden="true" />
           </button>
 
-          <span>{notice.description}</span>
+          {notice.description && <span>{notice.description}</span>}
         </div>
 
         <div className="noticeMeta">
-          {isAiMatched && (
+          {aiMatched && (
             <button
-              className={`aiMatchBadge ${isAiReasonOpen ? "active" : ""}`}
+              className={`aiScorePill tier-${tier} ${isAiReasonOpen ? "active" : ""}`}
               onClick={handleToggleAiReason}
+              aria-expanded={isAiReasonOpen}
+              aria-label={`AI 관련도 ${scorePercent}퍼센트, 선별 이유 보기`}
             >
-              <Zap size={12} />
-              AI 매치
+              <Sparkles size={12} aria-hidden="true" />
+              <span>AI {formatRelevance(notice.relevanceScore)}</span>
+              <ChevronDown
+                size={13}
+                className={`aiPillChevron ${isAiReasonOpen ? "open" : ""}`}
+                aria-hidden="true"
+              />
             </button>
           )}
 
@@ -90,7 +95,6 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
           {notice.isDeadlineSoon && (
             <div className="deadlineGroup">
               <strong className="deadlineBadge">마감임박</strong>
-
               {dDay !== null && (
                 <strong className="deadlineDday">
                   {dDay === 0 ? "D-DAY" : dDay > 0 ? `D-${dDay}` : "마감"}
@@ -103,44 +107,51 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
             {formatRelativeTime(notice.publishedAt)}
           </span>
 
-          {isAiMatched && (
-            <span
-              className={`aiReasonIcon ${isAiReasonOpen ? "active" : ""}`}
-              aria-hidden="true"
-            >
-              <Zap size={14} />
-            </span>
-          )}
-
           <button
             className={`saveIconButton ${notice.isSaved ? "saved" : ""}`}
             onClick={handleToggleSave}
-            aria-label="공지 저장"
+            aria-pressed={notice.isSaved}
+            aria-label={notice.isSaved ? "저장 해제" : "공지 저장"}
           >
-            <Bookmark
-              size={15}
-              fill={notice.isSaved ? "currentColor" : "none"}
-            />
+            <Bookmark size={15} fill={notice.isSaved ? "currentColor" : "none"} />
           </button>
         </div>
       </div>
 
-      {isAiMatched && isAiReasonOpen && (
+      {aiMatched && isAiReasonOpen && (
         <div className="aiReasonBox">
-          <p className="aiReasonTitle">
-            <Zap size={14} />
-            AI 선별 이유
-          </p>
+          <div className="aiReasonHead">
+            <p className="aiReasonTitle">
+              <Sparkles size={14} aria-hidden="true" />
+              AI 선별 이유
+            </p>
+            <span className={`aiReasonScore tier-${tier}`}>
+              관련도 {formatRelevance(notice.relevanceScore)}
+            </span>
+          </div>
+
+          <div
+            className="relevanceMeter"
+            role="meter"
+            aria-valuenow={scorePercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="AI 관련도"
+          >
+            <span
+              className={`relevanceMeterFill tier-${tier}`}
+              style={{ width: `${scorePercent}%` }}
+            />
+          </div>
 
           <p className="aiReasonText">
             {notice.reason ||
-              "사용자의 관심사 태그와 공지 내용이 관련성이 높습니다."}
+              "사용자의 관심 조건과 공지 내용의 관련성이 높습니다."}
           </p>
 
           {notice.matchedInterestTags?.length > 0 && (
             <div className="aiMatchedTagRow">
               <span>일치 조건</span>
-
               <div className="aiMatchedTags">
                 {notice.matchedInterestTags.map((tag) => (
                   <em key={tag}>{tag}</em>
