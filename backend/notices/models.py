@@ -52,6 +52,9 @@ class InboxNotice(models.Model):
     reason = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
     is_saved = models.BooleanField(default=False)
+    # 알림 발송 시각. null 이면 아직 미발송 → 알림 디스패처의 중복 발송 방지 기준.
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         constraints = [
@@ -59,6 +62,11 @@ class InboxNotice(models.Model):
                 fields=["user_id", "notice_id"],
                 name="unique_user_notice_inbox",
             )
+        ]
+        indexes = [
+            models.Index(fields=["user_id", "created_at"]),
+            models.Index(fields=["user_id", "is_read"]),
+            models.Index(fields=["notified_at"]),
         ]
 
     def __str__(self):

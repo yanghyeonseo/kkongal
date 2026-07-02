@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'notices.apps.NoticesConfig',
     'crawler.apps.CrawlerConfig',
     'alert.apps.AlertConfig',
+    'ai.apps.AiConfig',
 ]
 
 MIDDLEWARE = [
@@ -179,3 +180,56 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN': 'access_token',  # 🔹 Access Token의 이름 지정
     'REFRESH_TOKEN': 'refresh_token',  # 🔹 Refresh Token의 이름 지정
 }
+
+# ==========================================================================
+# AI 공지 선별 (LLM) — OpenAI 호환 Chat Completions API
+# --------------------------------------------------------------------------
+# 기본값은 가성비가 가장 좋은 Google Gemini(무료 티어 존재)의 OpenAI 호환
+# 엔드포인트를 가리킨다. OpenAI / DeepSeek / Groq / Together 등 OpenAI 호환
+# 제공자로 자유롭게 교체 가능(LLM_BASE_URL, LLM_MODEL, LLM_API_KEY 만 변경).
+# LLM_API_KEY 가 비어 있으면 키워드 기반 폴백으로 동작하여 오프라인/데모/테스트
+# 환경에서도 안전하게 돌아간다.
+# ==========================================================================
+LLM_API_KEY = env('LLM_API_KEY', default='')
+LLM_BASE_URL = env(
+    'LLM_BASE_URL',
+    default='https://generativelanguage.googleapis.com/v1beta/openai',
+)
+LLM_MODEL = env('LLM_MODEL', default='gemini-2.0-flash')
+LLM_TIMEOUT_SECONDS = env.float('LLM_TIMEOUT_SECONDS', default=30.0)
+LLM_MAX_CONTENT_CHARS = env.int('LLM_MAX_CONTENT_CHARS', default=2000)
+# inbox 편입 및 알림 대상이 되는 최소 관련도(0.0~1.0)
+LLM_RELEVANCE_THRESHOLD = env.float('LLM_RELEVANCE_THRESHOLD', default=0.5)
+
+# ==========================================================================
+# 이메일 알림 (SMTP) — Django 기본 메일 프레임워크 사용
+# --------------------------------------------------------------------------
+# 기본 backend는 콘솔 출력이라 자격 증명 없이도 데모/테스트가 동작한다.
+# 실제 발송은 .env 에서 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# 로 바꾸고 SMTP 자격 증명을 채우면 된다(예: Gmail 앱 비밀번호).
+# ==========================================================================
+EMAIL_BACKEND = env(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.console.EmailBackend',
+)
+EMAIL_HOST = env('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = env.int('EMAIL_PORT', default=587)
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = env(
+    'DEFAULT_FROM_EMAIL',
+    default='꽁알꽁알 <no-reply@kkongal.cloud>',
+)
+
+# ==========================================================================
+# 슬랙 알림
+# --------------------------------------------------------------------------
+# 사용자는 각자 Incoming Webhook URL 을 alert_channels.config.webhook_url 에
+# 등록한다. 아래 값은 등록된 채널이 없을 때 사용할 선택적 전역 폴백이다.
+# ==========================================================================
+SLACK_DEFAULT_WEBHOOK_URL = env('SLACK_DEFAULT_WEBHOOK_URL', default='')
+SLACK_TIMEOUT_SECONDS = env.float('SLACK_TIMEOUT_SECONDS', default=10.0)
+
+# 알림 메일/슬랙 메시지의 "대시보드에서 보기" 링크 등에 사용
+FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
