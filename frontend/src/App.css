@@ -79,6 +79,15 @@ button:disabled {
   font-weight: 900;
 }
 
+/* 브랜드 마스코트 로고 (header/landing/onboarding 공통) */
+.brandMark {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
 .brand strong {
   color: #161a22;
   font-size: 16px;

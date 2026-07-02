@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import {
-  Bell,
   Sparkles,
   Plus,
   X,
@@ -15,6 +14,7 @@ import {
   BellRing,
   Globe,
 } from "lucide-react";
+import logo from "../assets/logo.png";
 import SlackWebhookHelp from "./SlackWebhookHelp.jsx";
 import SiteCatalog from "./SiteCatalog.jsx";
 import { useToast } from "../context/toast.js";
@@ -201,9 +201,7 @@ function OnboardingWizard({ user, onComplete }) {
       <div className="onbCard">
         <div className="onbHead">
           <div className="lpBrand">
-            <span className="lpBrandIcon" style={{ width: 32, height: 32 }}>
-              <Bell size={17} strokeWidth={2.4} />
-            </span>
+            <img src={logo} className="brandMark" style={{ width: 30, height: 30 }} alt="꽁알" />
             <strong>꽁알 시작하기</strong>
           </div>
           <button

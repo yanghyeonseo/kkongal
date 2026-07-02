@@ -1,6 +1,16 @@
 // 같은 오리진(Vite dev 프록시)으로 요청하므로 base URL 은 비워둔다. → `/api/...`
 const API_BASE_URL = "";
 
+// 인증 자체를 수행하는 공개 엔드포인트. 이 경로들에는 (만료됐을 수 있는) access_token 을
+// 실어 보내지 않고, 401 이어도 refresh 재시도를 하지 않는다. 그래야 브라우저에 남은
+// stale 토큰 때문에 로그인/회원가입이 막히거나 무의미한 refresh 루프가 돌지 않는다.
+const AUTH_PATHS = [
+  "/api/account/signin/",
+  "/api/account/signup/",
+  "/api/account/refresh/",
+  "/api/account/logout/",
+];
+
 /**
  * API 에러. status 코드와 백엔드가 내려준 사람이 읽을 수 있는 메시지를 담는다.
  */
@@ -93,10 +103,12 @@ async function refreshAccessToken() {
  * - 401 이면 refresh 후 1회 재시도한다.
  */
 export async function apiRequest(path, options = {}, _retried = false) {
-  const accessToken = readCookie("access_token");
+  const isAuthPath = AUTH_PATHS.some((p) => path.startsWith(p));
+  // 인증 엔드포인트에는 stale 토큰을 붙이지 않는다(쿠키 credentials 는 그대로 전송).
+  const accessToken = isAuthPath ? null : readCookie("access_token");
   const response = await rawFetch(path, options, accessToken);
 
-  if (response.status === 401 && !_retried) {
+  if (response.status === 401 && !_retried && !isAuthPath) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       return apiRequest(path, options, true);

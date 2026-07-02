@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Bell,
   Sparkles,
   ArrowRight,
   Check,
@@ -11,6 +10,7 @@ import {
   BellRing,
   Rss,
 } from "lucide-react";
+import logo from "../assets/logo.png";
 
 const HOW_STEPS = [
   {
@@ -72,9 +72,7 @@ function Landing({ onOpenAuth }) {
     <div className={`landing ${scrolled ? "scrolled" : ""}`} ref={rootRef}>
       <nav className="landingNav">
         <div className="lpBrand">
-          <span className="lpBrandIcon">
-            <Bell size={20} strokeWidth={2.4} />
-          </span>
+          <img src={logo} className="brandMark" alt="꽁알" />
           <strong>꽁알</strong>
         </div>
         <div className="landingNavActions">
@@ -252,9 +250,7 @@ function Landing({ onOpenAuth }) {
 
       <footer className="landingFooter">
         <div className="lpBrand">
-          <span className="lpBrandIcon" style={{ width: 30, height: 30 }}>
-            <Bell size={16} strokeWidth={2.4} />
-          </span>
+          <img src={logo} className="brandMark" style={{ width: 28, height: 28 }} alt="꽁알" />
           <strong>꽁알</strong>
         </div>
         <span>관심사 기반 공지 큐레이션 · AI가 골라주는 맞춤 알림</span>

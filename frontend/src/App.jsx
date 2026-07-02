@@ -16,7 +16,6 @@ import { getMyInboxNotices, toggleInboxNoticeSave } from "./api/inboxApi.js";
 import { getNoticeSources, syncSource } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import {
-  getStoredUser,
   saveStoredUser,
   clearStoredUser,
   getCurrentUser,
@@ -71,9 +70,9 @@ function App() {
     let active = true;
 
     const hydrate = async () => {
-      const stored = getStoredUser();
-      if (stored) setCurrentUser(stored); // 낙관적 표시(깜빡임 방지)
-
+      // 인증 확인(=/me 성공) 전에는 currentUser 를 세우지 않는다. 낙관적으로 세우면
+      // 대시보드 로딩 이펙트가 돌아 interests/inbox/subscriptions 가 미인증으로 호출된다.
+      // 이 대기 구간은 authLoading 스피너가 가려준다.
       try {
         const user = await getCurrentUser();
         if (!active) return;

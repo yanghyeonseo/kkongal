@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Search, X, Tag, BellRing, LogOut, Plus } from "lucide-react";
+import { Search, X, Tag, BellRing, LogOut, Plus } from "lucide-react";
+import logo from "../assets/logo.png";
 
 function Header({
   currentUser,
@@ -44,9 +45,7 @@ function Header({
   return (
     <header className="header">
       <div className="brand">
-        <div className="brandIcon">
-          <Bell size={21} strokeWidth={2.4} />
-        </div>
+        <img src={logo} className="brandMark" alt="꽁알" />
         <strong>꽁알</strong>
       </div>
 
