@@ -5,6 +5,10 @@ django==6.0.6
 django-cors-headers==4.9.0
 django-environ==0.14.0
 djangorestframework==3.17.1
+# ── 프로덕션 서빙/DB ──────────────────────────────────────────────────────────
+gunicorn==23.0.0
+whitenoise==6.11.0
+psycopg[binary]==3.2.10
 djangorestframework-simplejwt==5.5.1
 drf-spectacular==0.29.0
 httpx==0.28.1

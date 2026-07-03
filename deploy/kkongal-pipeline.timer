@@ -1,0 +1,15 @@
+# =============================================================================
+# kkongal 파이프라인을 매시간 실행하는 systemd 타이머.
+# (상주 while-loop 스케줄러 대신, 한 번 실행 후 종료하는 방식이라 크래시에 강하다.)
+# 주기는 OnCalendar 로 조정한다(예: "*:0/30" = 30분마다).
+# =============================================================================
+[Unit]
+Description=Run kkongal notice pipeline hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=kkongal-pipeline.service
+
+[Install]
+WantedBy=timers.target

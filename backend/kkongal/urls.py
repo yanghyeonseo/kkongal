@@ -15,14 +15,22 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from account.urls import interest_urlpatterns
 from notices.urls import ai_urlpatterns
 from sources.urls import sources_urlpatterns
 
+
+def healthz(_request):
+    """로드밸런서(ALB) 헬스체크용 경량 엔드포인트. 인증·DB 접근 없이 200 을 반환한다."""
+    return JsonResponse({"status": "ok"})
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/healthz/', healthz, name='healthz'),
     path('api/account/', include('account.urls')),
     path('api/interests/', include((interest_urlpatterns, 'interests'))),
     path('api/subscriptions/', include('sources.urls')),
