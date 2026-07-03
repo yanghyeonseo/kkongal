@@ -4,7 +4,7 @@ from typing import Iterable
 
 from ..config_loader import Defaults, SiteConfig
 from ..schemas import RawNotice
-from .base import ScrapeContext, extract_body_text, find_row_date, first_text, make_notice, safe_href, take
+from .base import ScrapeContext, find_row_date, first_text, hydrate_bodies, make_notice, safe_href, take
 
 BODY_SELECTORS = [
     ".bbs_contents",
@@ -52,8 +52,4 @@ def scrape(ctx: ScrapeContext) -> Iterable[RawNotice]:
     resp = ctx.client.get(ctx.site.url)
     resp.raise_for_status()
     items = parse_html(resp.text, ctx.site, ctx.defaults)
-    for item in items:
-        detail = ctx.client.get(str(item.url))
-        detail.raise_for_status()
-        item.body = extract_body_text(detail.text, BODY_SELECTORS)
-    return items
+    return hydrate_bodies(ctx, items, BODY_SELECTORS)

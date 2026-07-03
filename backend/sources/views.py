@@ -215,7 +215,6 @@ class SourceDetailView(APIView):
 
         source = get_object_or_404(NoticeSource, id=source_id)
 
-        # 구독한 사이트만 표시명을 바꿀 수 있다.
         if not SourceSubscription.objects.filter(
             user_id=user, source_id=source
         ).exists():
@@ -262,7 +261,6 @@ class SourceSyncView(APIView):
 
         source = get_object_or_404(NoticeSource, id=source_id)
 
-        # 구독한 사이트만 동기화할 수 있다.
         if not SourceSubscription.objects.filter(
             user_id=user, source_id=source
         ).exists():
@@ -342,19 +340,13 @@ class SourceSyncView(APIView):
     def _crawl_recent(config, site):
         """최근 7일 이내 공지를 최대 20건 스크랩한다.
 
-        be-crawler 가 추가하는 ``NoticeCrawlService.crawl_recent`` 를 우선 쓰되, 아직
-        배포 전이면 기존 ``crawl_site`` 로 폴백해 이 파일이 항상 동작하게 한다.
-        순진한 매처는 OFF(match_inbox=False) — inbox 편입은 AI 선별만 담당.
+        순진한 매처는 OFF(match_inbox=False) — inbox 편입은 뒤이은 AI 선별만 담당한다.
         """
         repository = DjangoNoticeRepository(config=config, match_inbox=False)
         service = NoticeCrawlService(config=config, repository=repository)
-        crawl_recent = getattr(service, "crawl_recent", None)
-        if callable(crawl_recent):
-            return crawl_recent(
-                site.id, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP
-            )
-        log.info("crawl_recent 미배포 — crawl_site 폴백 (source=%s)", site.id)
-        return service.crawl_site(site.id)
+        return service.crawl_recent(
+            site.id, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP
+        )
 
     @staticmethod
     def _enrich_new_notices(notices):

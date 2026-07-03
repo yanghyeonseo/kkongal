@@ -19,6 +19,16 @@ from .throttling import TestSendRateThrottle
 logger = logging.getLogger("alert")
 
 
+def login_required_response(request):
+    """기본 권한이 AllowAny 이므로 로그인이 필요한 뷰는 인증을 직접 확인한다.
+
+    미인증이면 401 응답을, 인증된 요청이면 ``None`` 을 돌려준다.
+    """
+    if request.user.is_authenticated:
+        return None
+    return Response({"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED)
+
+
 class AlertChannelListView(APIView):
     @extend_schema(
         summary="알림 채널 목록 조회",
@@ -26,13 +36,11 @@ class AlertChannelListView(APIView):
         responses={200: AlertChannelSerializer(many=True), 401: "Unauthorized"},
     )
     def get(self, request):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
-        channels = AlertChannel.objects.filter(user_id=author).order_by("type", "id")
+        channels = AlertChannel.objects.filter(user_id=request.user).order_by("type", "id")
         serializer = AlertChannelSerializer(channels, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -53,39 +61,32 @@ class AlertChannelListView(APIView):
         },
     )
     def post(self, request):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         serializer = AlertChannelSerializer(data=request.data)
-        if serializer.is_valid(raise_exception=True):
-            channel = serializer.save(user_id=author)
-            # 연동 확인 메시지는 SMTP 왕복이 느리거나 멈출 수 있어, 요청 스레드에서
-            # 동기로 보내면 '추가' 버튼이 무한 로딩된다(원래 버그). 따라서 발송은
-            # 백그라운드(데몬 스레드)에서 논블로킹으로 처리하고 응답은 즉시 201 로
-            # 돌려준다. confirmation 은 실제 도착 여부가 아니라 'best-effort 로 발송을
-            # 시도 중'이라는 상태(pending)만 담는다.
-            try:
-                send_channel_connected_async(channel, author)
-                confirmation = {"ok": True, "error": "", "pending": True}
-            except Exception:  # noqa: BLE001 - 백그라운드 발송 트리거 실패가 생성을 막지 않도록
-                logger.exception("연동 확인 발송 트리거 실패 (채널=%s)", channel.id)
-                confirmation = {"ok": False, "error": "", "pending": False}
-            data = AlertChannelSerializer(channel).data
-            data["confirmation"] = confirmation
-            return Response(data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        channel = serializer.save(user_id=request.user)
+
+        # 연동 확인 발송을 요청 스레드에서 동기로 하면 SMTP 왕복 때문에 '추가' 버튼이
+        # 무한 로딩된다. 백그라운드로 위임하고 즉시 201 을 반환하며, confirmation 은
+        # 실제 도착 여부가 아니라 best-effort 발송 상태(pending)만 담는다.
+        try:
+            send_channel_connected_async(channel, request.user)
+            confirmation = {"ok": True, "error": "", "pending": True}
+        except Exception:  # 발송 트리거 실패가 채널 생성을 막지 않도록 방어
+            logger.exception("연동 확인 발송 트리거 실패 (채널=%s)", channel.id)
+            confirmation = {"ok": False, "error": "", "pending": False}
+
+        data = AlertChannelSerializer(channel).data
+        data["confirmation"] = confirmation
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 class AlertChannelDetailView(APIView):
     def get_channel(self, request, channel_id):
-        return get_object_or_404(
-            AlertChannel,
-            id=channel_id,
-            user_id=request.user,
-        )
+        return get_object_or_404(AlertChannel, id=channel_id, user_id=request.user)
 
     @extend_schema(
         summary="알림 채널 수정",
@@ -99,18 +100,15 @@ class AlertChannelDetailView(APIView):
         },
     )
     def patch(self, request, channel_id):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         channel = self.get_channel(request, channel_id)
         serializer = AlertChannelSerializer(channel, data=request.data, partial=True)
-        if serializer.is_valid(raise_exception=True):
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         summary="알림 채널 삭제",
@@ -118,11 +116,9 @@ class AlertChannelDetailView(APIView):
         responses={204: "No Content", 401: "Unauthorized", 404: "Not Found"},
     )
     def delete(self, request, channel_id):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         channel = self.get_channel(request, channel_id)
         channel.delete()
@@ -154,14 +150,12 @@ class AlertLogListView(APIView):
         },
     )
     def get(self, request):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         logs = (
-            AlertLog.objects.filter(inbox_notice_id__user_id=author)
+            AlertLog.objects.filter(inbox_notice_id__user_id=request.user)
             .select_related(
                 "inbox_notice_id",
                 "inbox_notice_id__notice_id",
@@ -191,7 +185,6 @@ class AlertLogListView(APIView):
 class AlertChannelTestView(APIView):
     # 테스트 발송은 사용자가 등록한 주소(config.address)/webhook 으로 실제 메일·슬랙을
     # 쏘므로, 임의 수신자 대량발송 악용을 막기 위해 사용자당 가벼운 rate-limit 을 건다.
-    # (인증된 본인 채널 한정이라 강한 제한은 불필요 — 오남용만 차단.)
     throttle_classes = [TestSendRateThrottle]
 
     @extend_schema(
@@ -211,14 +204,12 @@ class AlertChannelTestView(APIView):
         },
     )
     def post(self, request, channel_id):
-        author = request.user
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        auth_error = login_required_response(request)
+        if auth_error:
+            return auth_error
 
         # 소유하지 않은 채널이면 404 (다른 alert 뷰와 동일한 패턴).
-        channel = get_object_or_404(AlertChannel, id=channel_id, user_id=author)
+        channel = get_object_or_404(AlertChannel, id=channel_id, user_id=request.user)
 
         sender = get_sender(channel)
         if sender is None:
@@ -227,5 +218,5 @@ class AlertChannelTestView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        ok, error = sender.send_test(author)
+        ok, error = sender.send_test(request.user)
         return Response({"ok": ok, "error": error}, status=status.HTTP_200_OK)

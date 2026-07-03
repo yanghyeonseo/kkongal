@@ -111,6 +111,27 @@ def extract_meta_content(html: str, names: list[str]) -> Optional[str]:
     return None
 
 
+def hydrate_bodies(
+    ctx: ScrapeContext,
+    items: list[RawNotice],
+    body_selectors: list[str],
+    *,
+    headers: Optional[dict] = None,
+    extractor: Optional[Callable[[str], Optional[str]]] = None,
+) -> list[RawNotice]:
+    """목록에서 얻은 각 공지의 상세 페이지를 받아 ``body`` 를 채운다.
+
+    목록→상세→본문 추출 루프는 스크래퍼 대부분이 공유한다. 요청 헤더와 본문 추출
+    방식(``body_selectors`` 또는 커스텀 ``extractor``)만 사이트마다 다르다.
+    """
+    for item in items:
+        detail = ctx.client.get(str(item.url), headers=headers)
+        detail.raise_for_status()
+        body = extractor(detail.text) if extractor else None
+        item.body = body or extract_body_text(detail.text, body_selectors)
+    return items
+
+
 def make_notice(
     *,
     site_id: str,

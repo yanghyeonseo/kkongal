@@ -1,9 +1,6 @@
 from django.urls import path
 
 from .views import (
-    AiInboxNoticeCreateView,
-    AiNoticeCandidateListView,
-    AiNoticeListView,
     AiStatusView,
     InboxNoticeDetailView,
     InboxNoticeListView,
@@ -21,9 +18,8 @@ urlpatterns = [
     path("inbox/<int:inbox_notice_id>/read/", InboxNoticeReadView.as_view()),
 ]
 
+# Mounted at /api/ai/ by kkongal/urls.py. Only the status banner endpoint remains;
+# the pipeline itself runs through ai.service over the ORM, not HTTP.
 ai_urlpatterns = [
     path("status/", AiStatusView.as_view()),
-    path("notices/", AiNoticeListView.as_view()),
-    path("notices/<int:notice_id>/candidates/", AiNoticeCandidateListView.as_view()),
-    path("inbox-notices/", AiInboxNoticeCreateView.as_view()),
 ]

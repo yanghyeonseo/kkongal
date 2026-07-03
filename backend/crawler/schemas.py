@@ -23,18 +23,6 @@ class RawNotice(BaseModel):
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-class StoredNotice(BaseModel):
-    id: int
-    source_id: str
-    title: str
-    url: str
-    posted_at: Optional[str] = None
-    summary: Optional[str] = None
-    body: Optional[str] = None
-    hash: str
-    fetched_at: str
-
-
 class CrawlReport(BaseModel):
     source_id: str
     fetched: int

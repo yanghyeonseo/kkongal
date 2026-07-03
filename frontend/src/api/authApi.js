@@ -29,17 +29,6 @@ function normalizeUser(data, fallback = {}) {
   };
 }
 
-export function getStoredUser() {
-  const savedUser = localStorage.getItem(USER_STORAGE_KEY);
-  if (!savedUser) return null;
-
-  try {
-    return JSON.parse(savedUser);
-  } catch {
-    return null;
-  }
-}
-
 export function saveStoredUser(user) {
   localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
 }

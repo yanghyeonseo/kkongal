@@ -169,75 +169,42 @@ CORS_ALLOW_HEADERS = (
 
 AUTH_USER_MODEL = 'account.User'
 
-REST_USE_JWT = True 
-
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30), 
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1), 
-    'ROTATE_REFRESH_TOKENS': True,  # 🔹 Refresh Token을 사용할 때마다 새 토큰 발급
-    'BLACKLIST_AFTER_ROTATION': True,  # 🔹 이전 Refresh Token을 블랙리스트에 추가하여 재사용 방지
-    'AUTH_HEADER_TYPES': ('Bearer',),  # 🔹 인증 헤더 타입을 "Bearer"로 설정
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),  # 🔹 Access Token 클래스를 지정
-    'ACCESS_TOKEN': 'access_token',  # 🔹 Access Token의 이름 지정
-    'REFRESH_TOKEN': 'refresh_token',  # 🔹 Refresh Token의 이름 지정
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
 }
 
-# ==========================================================================
-# AI 공지 선별 (LLM) — OpenAI 호환 Chat Completions API
-# --------------------------------------------------------------------------
-# 기본값은 가성비가 가장 좋은 Google Gemini(무료 티어 존재)의 OpenAI 호환
-# 엔드포인트를 가리킨다. OpenAI / DeepSeek / Groq / Together 등 OpenAI 호환
-# 제공자로 자유롭게 교체 가능(LLM_BASE_URL, LLM_MODEL, LLM_API_KEY 만 변경).
-# LLM_API_KEY 가 비어 있으면 키워드 기반 폴백으로 동작하여 오프라인/데모/테스트
-# 환경에서도 안전하게 돌아간다.
-# ==========================================================================
+# ── AI 공지 선별 (LLM, OpenAI 호환 Chat Completions) ─────────────────────────
+# 기본은 Google Gemini(가성비·무료 티어). LLM_BASE_URL/LLM_MODEL/LLM_API_KEY 만 바꾸면
+# OpenAI·DeepSeek·Groq 등으로 교체 가능. 키가 비면 키워드 폴백으로 동작한다.
 LLM_API_KEY = env('LLM_API_KEY', default='')
-LLM_BASE_URL = env(
-    'LLM_BASE_URL',
-    default='https://generativelanguage.googleapis.com/v1beta/openai',
-)
-# gemini-2.5-flash-lite: Google 최저가 · 분류/라우팅 특화(가성비 최상). 무료 티어 존재.
+LLM_BASE_URL = env('LLM_BASE_URL', default='https://generativelanguage.googleapis.com/v1beta/openai')
 LLM_MODEL = env('LLM_MODEL', default='gemini-2.5-flash-lite')
 LLM_TIMEOUT_SECONDS = env.float('LLM_TIMEOUT_SECONDS', default=30.0)
 LLM_MAX_CONTENT_CHARS = env.int('LLM_MAX_CONTENT_CHARS', default=2000)
-# inbox 편입 및 알림 대상이 되는 최소 관련도(0.0~1.0)
-LLM_RELEVANCE_THRESHOLD = env.float('LLM_RELEVANCE_THRESHOLD', default=0.5)
+LLM_RELEVANCE_THRESHOLD = env.float('LLM_RELEVANCE_THRESHOLD', default=0.5)  # inbox/알림 최소 관련도
 
-# ==========================================================================
-# 이메일 알림 (SMTP) — Django 기본 메일 프레임워크 사용
-# --------------------------------------------------------------------------
-# 기본 backend는 콘솔 출력이라 자격 증명 없이도 데모/테스트가 동작한다.
-# 실제 발송은 .env 에서 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-# 로 바꾸고 SMTP 자격 증명을 채우면 된다(예: Gmail 앱 비밀번호).
-# ==========================================================================
-EMAIL_BACKEND = env(
-    'EMAIL_BACKEND',
-    default='django.core.mail.backends.console.EmailBackend',
-)
+# ── 이메일 알림 (SMTP) ───────────────────────────────────────────────────────
+# 기본은 콘솔 백엔드(자격 증명 없이 동작). 587 STARTTLS 가 막히는 망에서는 .env 에서
+# EMAIL_PORT=465 · EMAIL_USE_SSL=True · EMAIL_USE_TLS=False 로 전환한다.
+EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = env('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = env.int('EMAIL_PORT', default=587)
 EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
-# 465(SSL) 지원. 일부 네트워크는 587(STARTTLS) 핸드셰이크가 막혀 타임아웃 나므로,
-# 그럴 땐 .env 에서 EMAIL_PORT=465 · EMAIL_USE_SSL=True · EMAIL_USE_TLS=False 로 전환.
 EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=False)
-# TLS(587)와 SSL(465)은 동시에 켤 수 없다 — SSL 이 켜지면 TLS 를 끈다(Django 요구사항).
-if EMAIL_USE_SSL:
+if EMAIL_USE_SSL:  # TLS/SSL 동시 사용 불가
     EMAIL_USE_TLS = False
-# SMTP 연결이 멈춰도 요청이 무한 대기하지 않도록 타임아웃(초)을 둔다.
 EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=20)
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = env(
-    'DEFAULT_FROM_EMAIL',
-    default='꽁알꽁알 <no-reply@kkongal.cloud>',
-)
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='꽁알꽁알 <no-reply@kkongal.cloud>')
 
-# ==========================================================================
-# 슬랙 알림
-# --------------------------------------------------------------------------
-# 사용자는 각자 Incoming Webhook URL 을 alert_channels.config.webhook_url 에
-# 등록한다. 아래 값은 등록된 채널이 없을 때 사용할 선택적 전역 폴백이다.
-# ==========================================================================
+# ── 슬랙 알림 ────────────────────────────────────────────────────────────────
+# Webhook 은 사용자별 alert_channels.config 에 저장. 아래는 선택적 전역 폴백.
 SLACK_DEFAULT_WEBHOOK_URL = env('SLACK_DEFAULT_WEBHOOK_URL', default='')
 SLACK_TIMEOUT_SECONDS = env.float('SLACK_TIMEOUT_SECONDS', default=10.0)
 

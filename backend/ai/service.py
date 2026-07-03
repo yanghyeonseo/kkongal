@@ -51,14 +51,14 @@ class RunSummary:
 
     notices_processed: int = 0
     candidates: int = 0  # 실제 분류를 시도한 (공지,사용자) 쌍 수
-    created: int = 0  # 새로 만든 InboxNotice
+    created: int = 0
     updated: int = 0  # 갱신/덮어쓴 InboxNotice(순진한 매처 행 override 포함)
-    below_threshold: int = 0  # 임계값 미만이라 편입 제외
+    below_threshold: int = 0
     downgraded: int = 0  # 재판정에서 임계값 밑으로 떨어져 기존 행을 삭제한 수
     skipped_existing: int = 0  # 이미 'AI' 로 분류된 쌍이라 LLM 호출 생략(NFR-6)
     errors: int = 0
-    llm_calls: int = 0  # 실제 LLM 경로로 판정한 횟수
-    fallback_calls: int = 0  # 키워드 폴백으로 판정한 횟수
+    llm_calls: int = 0
+    fallback_calls: int = 0
 
     def merge(self, other: "RunSummary") -> None:
         for name in _COUNTER_FIELDS:

@@ -114,8 +114,8 @@ def enrich_notice(
 
         notice.summary = result.summary
         notice.content_markdown = result.content_markdown
-        # 보강이 마감일을 못 뽑아냈으면(LLM null / 폴백) 기존 값(크롤러·시드가 넣은
-        # deadline_at)을 덮어써 지우지 않는다 — 있는 마감일을 보존한다.
+        # 보강이 마감일을 못 뽑아냈으면(LLM null / 폴백) 크롤러가 넣어 둔 기존
+        # deadline_at 을 덮어써 지우지 않는다 — 있는 마감일을 보존한다.
         notice.deadline_at = deadline or notice.deadline_at
         notice.save(
             update_fields=[

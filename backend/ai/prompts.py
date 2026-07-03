@@ -117,11 +117,8 @@ def build_messages(
     ]
 
 
-# ==========================================================================
-# 공지 보강(enrichment) 프롬프트 — 사용자/관심사 무관. recommendation 과 완전히 분리.
-# 공지당 1회 호출로 summary(3문장) / content_markdown(원문 보존 markdown) /
-# deadline_at(마감일) 세 가지를 한 번에 산출한다.
-# ==========================================================================
+# 공지 보강(enrichment) 프롬프트 — 사용자/관심사 무관, recommendation 과 분리.
+# 공지당 1회 호출로 summary(3문장)·content_markdown·deadline_at 을 한 번에 산출한다.
 ENRICH_SYSTEM_PROMPT = (
     "당신은 공지사항 정리 도우미입니다. 하나의 공지 원문(제목+본문)을 받아 아래 세 "
     "가지를 만들어 JSON 으로 반환합니다.\n\n"

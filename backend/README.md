@@ -1,134 +1,71 @@
-## [backend 실행 가이드]
+# backend — 꽁알꽁알 Django 서버
 
-1. 깃 클론
+## 개요
 
-```
-git clone https://github.com/yanghyeonseo/kkongal.git
-cd kkongal/backend
-git switch feature/backend_basic
-```
+꽁알꽁알 백엔드는 **Django 6 + Django REST Framework** 기반의 API 서버로, 공지 수집부터 AI 선별, 멀티채널 알림까지의 파이프라인을 오케스트레이션한다. 기능은 여섯 개의 앱으로 나뉜다 — 계정·관심사(`account`), 출처·구독(`sources`), 공지 원본·공지함(`notices`), 수집(`crawler`), LLM 보강·선별(`ai`), 알림 발송(`alert`). 인증은 SimpleJWT 를 쓰되 프론트의 쿠키 흐름에 맞춰 `access_token` 쿠키도 읽는다. 데이터베이스는 개발 편의를 위해 SQLite 이며, 비밀 값과 외부 연동(LLM·SMTP)은 모두 `.env` 로 관리한다.
 
-2. 장고 키 세팅: root directory에 .env 파일 생성 후, 키 입력 (https://djecrety.ir/)
+## 구성
 
-```
-# .env
+| 앱 | 책임 | 상세 |
+| --- | --- | --- |
+| `account` | 사용자·인증(쿠키 JWT)·관심 조건 | [account/README.md](account/README.md) |
+| `sources` | 공지 출처(`NoticeSource`)·구독·카탈로그·온디맨드 동기화 | [sources/README.md](sources/README.md) |
+| `notices` | 공지 원본(`Notice`)·사용자별 공지함(`InboxNotice`)·AI 상태 | [notices/README.md](notices/README.md) |
+| `crawler` | 사이트별 스크래핑·저장·스케줄러 | [crawler/README.md](crawler/README.md) |
+| `ai` | LLM 보강(요약·markdown·마감일)·의미 기반 선별 | [ai/README.md](ai/README.md) |
+| `alert` | 이메일·슬랙 발송·비블로킹 연동 확인·중복 방지 | [alert/README.md](alert/README.md) |
+| `kkongal/` | 프로젝트 설정(`settings.py`)·전체 라우팅(`urls.py`) | — |
 
-SECRET_KEY='자기 장고 키'
-DEBUG=True
-```
+데이터 모델의 상세 스키마와 ERD 는 [docs/data-model.md](../docs/data-model.md) 를 참고한다.
 
-3. 가상환경 생성 및 서버 실행
+## 흐름 · 사용법
 
-```
-uv sync
-uv run python manage.py migrate
-uv run python manage.py runserver
-```
+### 요청·인증 모델
 
-<br>
+프론트는 Vite dev 서버(3000)에서 `/api` 를 백엔드(8000)로 프록시하므로 브라우저 입장에서 same-origin 이고, 로그인 시 백엔드가 내려준 JWT 쿠키가 1st-party 로 오간다. 인증은 `account.authentication.CookieJWTAuthentication` 이 담당한다 — `Authorization: Bearer` 헤더 우선, 없으면 `access_token` 쿠키를 읽고, 만료/무효 토큰은 예외 대신 비인증으로 흘려 공개 엔드포인트를 막지 않는다. 보호 뷰는 `request.user.is_authenticated` 로 접근을 통제한다. API 명세는 실행 후 Swagger UI(`/api/schema/swagger-ui/`)에서 확인한다.
 
-## [backend 추가된 폴더 구조]
+### 실행
 
-```text
-backend/
-├─ kkongal/                  # Django project 설정
-│  ├─ settings.py             # 앱 등록, DB, JWT, CORS 설정
-│  └─ urls.py                 # 전체 API 라우팅
-│
-├─ account/                  # 유저/관심사
-│  ├─ models.py               # User, Interest
-│  ├─ views.py                # signup, signin, refresh, logout, interests API
-│  ├─ serializers.py
-│  └─ urls.py
-│
-├─ sources/                  # 사용자가 등록한 공지 사이트
-│  ├─ models.py               # NoticeSource, SourceSubscription
-│  ├─ views.py                # subscriptions API
-│  ├─ serializers.py
-│  └─ urls.py
-│
-├─ notices/                  # 공지 원본 및 사용자별 inbox 공지
-│  ├─ models.py               # Notice, InboxNotice
-│  ├─ views.py                # inbox notice API, AI용 notices API
-│  ├─ serializers.py
-│  └─ urls.py
-│
-├─ alert/                    # 알림 채널 및 발송 로그
-│  ├─ models.py               # AlertChannel, AlertLog
-│  ├─ views.py                # alert-channels API, alert-logs API
-│  ├─ serializers.py
-│  └─ urls.py
-│
-├─ manage.py
-├─ pyproject.toml
-└─ uv.lock
+```bash
+cd backend
+uv venv --python 3.12 .venv          # 또는: python3.12 -m venv .venv
+uv pip install -r requirements.txt   # 또는: .venv/bin/pip install -r requirements.txt
+
+cp .env.example .env                 # SECRET_KEY 등 값 채우기
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py runserver # http://127.0.0.1:8000
 ```
 
-<br>
+`uv` 를 쓰면 `uv sync` → `uv run python manage.py ...` 로도 동일하게 실행된다.
 
-## [프론트엔드용 API]
+### 파이프라인·명령
 
-(Swagger에서 자세히 확인 가능: http://127.0.0.1:8000/api/schema/swagger-ui/)
+크롤 → 보강 → 선별 → 발송이 파이프라인의 4단계다.
 
-로그인/유저 API
+```bash
+python manage.py run_pipeline --crawl   # 크롤부터 끝까지 한 번에(스케줄러/cron 용)
+python manage.py run_scheduler --once   # 크롤(due) → 보강 → 선별 → 발송 한 틱
 
-- POST /api/account/signup/
-- POST /api/account/login/
-- POST /api/account/refresh/
-- POST /api/account/logout/
-- GET /api/account/me
+# 단계별 개별 실행
+python manage.py crawl_notices --source snu_cse_notice --no-match
+python manage.py classify_notices
+python manage.py dispatch_alerts
+```
 
-관심사 API
+### 테스트
 
-- GET /api/interests/
-- POST /api/interests/
-- PUT /api/interests/{id}/
-- DELETE /api/interests/{id}/
+```bash
+.venv/bin/python manage.py check                 # 설정/모델 무결성
+.venv/bin/python manage.py test                  # 전체 스위트
+.venv/bin/python manage.py test ai alert notices # 특정 앱만
+```
 
-등록된 공지 사이트 API
+테스트는 실제 LLM/이메일을 호출하지 않는다 — `LLM_API_KEY` 를 비우면 키워드 폴백으로, 이메일은 locmem/console 백엔드로 동작한다.
 
-- GET /api/subscriptions/
-- POST /api/subscriptions/
-- DELETE /api/subscriptions/{id}/
+## 유의사항
 
-공지 목록 API
-
-- GET /api/notices/inbox/
-- GET /api/notices/inbox/{id}/
-- PATCH /api/notices/inbox/{id}/save/
-
-알림 채널 설정 API
-
-- GET /api/alert-channels/
-- POST /api/alert-channels/
-- PATCH /api/alert-channels/{id}/
-- DELETE /api/alert-channels/{id}/
-
-알림 로그 조회 API
-
-- GET /api/alert-logs/
-
-  <br>
-
-## [AI용 API]
-
-(Swagger에서 자세히 확인 가능(ai 탭): http://127.0.0.1:8000/api/schema/swagger-ui/)
-
-분석할 공지 조회
-
-- GET /api/ai/notices/
-
-공지의 출처 사이트를 구독한 유저와 그 관심사 조회
-
-- GET /api/ai/notices/{notice_id}/candidates/
-
-AI 분석 결과 저장 (inbox_notices로)
-
-- POST /api/ai/inbox-notices/
-
-  <br>
-  <br>
-
-## [ERD 수정사항]
-
-<img src="img/DB_스키마.png">
+- 공개 API 경로·응답 필드·모델은 프론트가 의존하는 계약이다. 내부 리팩터는 자유롭되 이 계약은 보존한다.
+- `.env` 는 절대 커밋하지 않는다(`.env.example` 참고). 핵심 값: `SECRET_KEY`, `LLM_API_KEY`(선택), 이메일 `EMAIL_*`, `FRONTEND_URL`. 슬랙 Webhook 은 서버 설정이 아니라 사용자별로 웹 UI 에서 등록한다.
+- **AI 선별은 관리 명령/서비스(ORM)로 동작**하며 별도 HTTP 계약을 두지 않는다. 외부에 노출되는 AI 엔드포인트는 프론트 배너용 `GET /api/ai/status/` 하나뿐이다.
+- 별도의 데모 시드 명령은 없다. 테스트는 각 앱이 필요한 객체를 직접 만들어 검증한다.
+- DB 는 SQLite(`db.sqlite3`)이고 스케줄러는 관리 명령 루프(`run_scheduler`)로 구현돼 있다 — 별도 브로커/워커가 필요 없다.

@@ -61,7 +61,6 @@ function Markdown({ text }) {
   while (i < lines.length) {
     const line = lines[i];
 
-    // 코드 펜스 ```
     if (/^\s*```/.test(line)) {
       const buf = [];
       i += 1;
@@ -78,20 +77,18 @@ function Markdown({ text }) {
       continue;
     }
 
-    // 빈 줄
     if (!line.trim()) {
       i += 1;
       continue;
     }
 
-    // 수평선
     if (HR_RE.test(line)) {
       blocks.push(<hr key={key++} />);
       i += 1;
       continue;
     }
 
-    // 제목 — 모달 맥락상 한 단계 낮춰 렌더(#→h2)해 시각 위계를 맞춘다.
+    // 모달 맥락상 제목을 한 단계 낮춰 렌더(#→h2)해 시각 위계를 맞춘다.
     const heading = /^(#{1,6})\s+(.*)$/.exec(line.trim());
     if (heading) {
       const Tag = `h${Math.min(heading[1].length + 1, 6)}`;
@@ -100,7 +97,6 @@ function Markdown({ text }) {
       continue;
     }
 
-    // 인용
     if (/^\s*>\s?/.test(line)) {
       const buf = [];
       while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
@@ -111,7 +107,6 @@ function Markdown({ text }) {
       continue;
     }
 
-    // 순서 없는 목록
     if (/^\s*[-*+]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
@@ -128,7 +123,6 @@ function Markdown({ text }) {
       continue;
     }
 
-    // 순서 있는 목록
     if (/^\s*\d+[.)]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {

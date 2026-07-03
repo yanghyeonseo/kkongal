@@ -29,7 +29,6 @@ from .status import mark_degraded, mark_ok
 
 logger = logging.getLogger("ai")
 
-# provider 값
 PROVIDER_LLM = "llm"
 PROVIDER_FALLBACK = "fallback"
 
@@ -49,19 +48,10 @@ _RETRY_BACKOFF = 0.6
 class Verdict:
     """분류 결과. score 는 항상 0.0~1.0 로 클램프된다."""
 
-    relevant: bool
     score: float
     matched_keywords: list[str] = field(default_factory=list)
     reason: str = ""
     provider: str = PROVIDER_LLM
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "relevant": self.relevant,
-            "score": self.score,
-            "matched_keywords": list(self.matched_keywords),
-            "reason": self.reason,
-        }
 
 
 @dataclass
@@ -200,7 +190,7 @@ class LLMClient:
                 summary=summary,
             )
             return self._parse_verdict(data)
-        except Exception as exc:  # 결코 밖으로 던지지 않는다
+        except Exception as exc:
             logger.warning(
                 "LLM 호출/파싱 실패 → 키워드 폴백 전환 (model=%s): %s",
                 self.model,
@@ -275,7 +265,6 @@ class LLMClient:
                 mark_degraded("quota")
             response.raise_for_status()
             body = response.json()
-            # 성공 호출은 소진 상태를 해제한다.
             mark_ok()
 
         content_text = body["choices"][0]["message"]["content"]
@@ -300,7 +289,7 @@ class LLMClient:
                 build_enrichment_messages(title=title, content=truncated)
             )
             return self._parse_enrichment(data, original)
-        except Exception as exc:  # 결코 밖으로 던지지 않는다
+        except Exception as exc:
             logger.warning(
                 "LLM 보강 호출/파싱 실패 → 오프라인 폴백 전환 (model=%s): %s",
                 self.model,
@@ -363,10 +352,8 @@ class LLMClient:
         else:
             keywords = []
 
-        relevant = bool(data.get("relevant", score > 0))
         reason = str(data.get("reason", "")).strip()
         return Verdict(
-            relevant=relevant,
             score=score,
             matched_keywords=keywords,
             reason=reason,
@@ -410,7 +397,6 @@ class LLMClient:
             logger.debug("fallback reason note: %s", note)
 
         return Verdict(
-            relevant=bool(matched),
             score=score,
             matched_keywords=matched,
             reason=reason,

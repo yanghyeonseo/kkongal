@@ -18,10 +18,3 @@ def http_client(defaults: Defaults) -> httpx.Client:
         verify=False,
         trust_env=False,
     )
-
-
-def fetch_html(client: httpx.Client, url: str) -> str:
-    resp = client.get(url)
-    resp.raise_for_status()
-    resp.encoding = resp.encoding or "utf-8"
-    return resp.text

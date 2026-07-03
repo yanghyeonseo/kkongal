@@ -39,20 +39,6 @@ export function formatRelativeTime(dateString) {
   return `${year}.${month}.${date}`;
 }
 
-export function isToday(dateString) {
-  if (!dateString) {
-    return false;
-  }
-
-  const targetDate = new Date(dateString);
-  const today = new Date();
-
-  return (
-    targetDate.getFullYear() === today.getFullYear() &&
-    targetDate.getMonth() === today.getMonth() &&
-    targetDate.getDate() === today.getDate()
-  );
-}
 // 절대 날짜 표기(YYYY.M.D). 잘못된 값이면 빈 문자열.
 export function formatDate(dateString) {
   if (!dateString) return "";

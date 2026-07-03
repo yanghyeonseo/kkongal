@@ -7,28 +7,35 @@ from drf_spectacular.utils import extend_schema
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
-from account.request_serializers import SignInRequestSerializer, SignUpRequestSerializer, TokenRefreshRequestSerializer, LogoutRequestSerializer
+from account.request_serializers import (
+    SignInRequestSerializer,
+    SignUpRequestSerializer,
+    TokenRefreshRequestSerializer,
+    LogoutRequestSerializer,
+)
 from .models import Interest
 from .serializers import InterestSerializer, UserSerializer
 
 User = get_user_model()
 
-def generate_token_in_serialized_data(user):
-    token = RefreshToken.for_user(user)
-    refresh_token, access_token = str(token), str(token.access_token)
-    serialized_data = UserSerializer(user).data
-    serialized_data["token"] = {"access": access_token, "refresh": refresh_token}
-    return serialized_data
 
 def set_token_on_response_cookie(user, status_code):
     token = RefreshToken.for_user(user)
-    serialized_data = UserSerializer(user).data
-    res = Response(serialized_data, status=status_code)
-    # res.set_cookie("refresh_token", value=str(token), httponly=True)
-    # res.set_cookie("access_token", value=str(token.access_token), httponly=True)
-    res.set_cookie("refresh_token", value=str(token))
-    res.set_cookie("access_token", value=str(token.access_token))
-    return res
+    response = Response(UserSerializer(user).data, status=status_code)
+    response.set_cookie("refresh_token", value=str(token))
+    response.set_cookie("access_token", value=str(token.access_token))
+    return response
+
+
+def login_required_response(request):
+    """기본 권한이 AllowAny 이므로 로그인이 필요한 뷰는 인증을 직접 확인한다.
+
+    미인증이면 401 응답을, 인증된 요청이면 ``None`` 을 돌려준다.
+    """
+    if request.user.is_authenticated:
+        return None
+    return Response({"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED)
+
 
 class SignUpView(APIView):
     @extend_schema(
@@ -38,15 +45,13 @@ class SignUpView(APIView):
         responses={201: "JWT Token 발급", 400: "Bad Request"},
     )
     def post(self, request):
-        # 검증(email 필수·형식·유니크 / username 유니크 / password 강도)은
-        # SignUpRequestSerializer 가 담당한다. 실패 시 raise_exception=True 로
-        # 400 필드 에러({"email": [...], "password": [...]})가 반환된다.
-        request_serializer = SignUpRequestSerializer(data=request.data)
-        request_serializer.is_valid(raise_exception=True)
-        user = request_serializer.save()
-
-        # token 추가 & cookie에 담기 (응답 user 에 onboarded=false 포함)
+        # 이메일/사용자명/비밀번호 검증은 SignUpRequestSerializer 가 담당하며,
+        # 실패 시 raise_exception 이 400 필드 에러로 응답한다.
+        serializer = SignUpRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
         return set_token_on_response_cookie(user, status_code=status.HTTP_201_CREATED)
+
 
 class SignInView(APIView):
     @extend_schema(
@@ -65,20 +70,19 @@ class SignInView(APIView):
             )
         try:
             user = User.objects.get(username=username)
-            if not user.check_password(password):
-                return Response(
-                    {"message": "Password is incorrect"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            ## token 추가
-            return set_token_on_response_cookie(user, status_code=status.HTTP_200_OK)
-
         except User.DoesNotExist:
             return Response(
                 {"message": "User does not exist"}, status=status.HTTP_404_NOT_FOUND
             )
-        
+
+        if not user.check_password(password):
+            return Response(
+                {"message": "Password is incorrect"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return set_token_on_response_cookie(user, status_code=status.HTTP_200_OK)
+
+
 class TokenRefreshView(APIView):
     @extend_schema(
         summary="토큰 재발급",
@@ -88,29 +92,24 @@ class TokenRefreshView(APIView):
     )
     def post(self, request):
         refresh_token = request.COOKIES.get("refresh_token") or request.data.get("refresh")
-        
-        #### 1
         if not refresh_token:
             return Response(
                 {"detail": "no refresh token"}, status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-        #### 2
             new_token = RefreshToken(refresh_token)
             new_token.verify()
-        except:
+        except Exception:
             return Response(
                 {"detail": "please signin again."}, status=status.HTTP_401_UNAUTHORIZED
             )
-            
-        #### 3
-        new_access_token = str(new_token.access_token)
+
         response = Response({"detail": "token refreshed"}, status=status.HTTP_200_OK)
-        # response.set_cookie("access_token", value=str(new_access_token), httponly=True)
-        response.set_cookie("access_token", value=str(new_access_token))
+        response.set_cookie("access_token", value=str(new_token.access_token))
         return response
-    
+
+
 class LogoutView(APIView):
     @extend_schema(
         summary="로그아웃",
@@ -120,26 +119,24 @@ class LogoutView(APIView):
     )
     def post(self, request):
         refresh_token = request.COOKIES.get("refresh_token") or request.data.get("refresh")
-
         if not refresh_token:
             return Response(
                 {"detail": "no refresh token"}, status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             new_token = RefreshToken(refresh_token)
             new_token.verify()
             new_token.blacklist()
-
-        except:
+        except Exception:
             return Response(
                 {"detail": "please signin again."}, status=status.HTTP_401_UNAUTHORIZED
             )
-        
-        res = Response(status=status.HTTP_204_NO_CONTENT)
-        res.delete_cookie("access_token")
-        res.delete_cookie("refresh_token")
-        return res
+
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        response.delete_cookie("access_token")
+        response.delete_cookie("refresh_token")
+        return response
 
 
 class MeView(APIView):
@@ -163,8 +160,7 @@ class MeView(APIView):
                 {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        serializer = UserSerializer(user)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
 class OnboardingCompleteView(APIView):
@@ -175,12 +171,11 @@ class OnboardingCompleteView(APIView):
         responses={200: UserSerializer, 401: "Unauthorized"},
     )
     def post(self, request):
-        user = request.user
-        if not user.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
+        user = request.user
         user.onboarded = True
         user.save(update_fields=["onboarded"])
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
@@ -193,15 +188,13 @@ class InterestListView(APIView):
         responses={200: InterestSerializer(many=True), 401: "Unauthorized"},
     )
     def get(self, request):
-        ## 토큰을 통해 담긴 유저 정보 받아오기
-        author = request.user
-        ## 인증 여부 확인
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
-        interests = Interest.objects.filter(user_id=author).order_by("-priority", "-created_at")
+        interests = Interest.objects.filter(user_id=request.user).order_by(
+            "-priority", "-created_at"
+        )
         serializer = InterestSerializer(interests, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -212,19 +205,14 @@ class InterestListView(APIView):
         responses={201: InterestSerializer, 400: "Bad Request", 401: "Unauthorized"},
     )
     def post(self, request):
-        ## 토큰을 통해 담긴 유저 정보 받아오기
-        author = request.user
-        ## 인증 여부 확인
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         serializer = InterestSerializer(data=request.data)
-        if serializer.is_valid(raise_exception=True):
-            interest = serializer.save(user_id=author)
-            return Response(InterestSerializer(interest).data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        interest = serializer.save(user_id=request.user)
+        return Response(InterestSerializer(interest).data, status=status.HTTP_201_CREATED)
 
 
 class InterestDetailView(APIView):
@@ -238,20 +226,15 @@ class InterestDetailView(APIView):
         responses={200: InterestSerializer, 400: "Bad Request", 401: "Unauthorized", 404: "Not Found"},
     )
     def put(self, request, interest_id):
-        ## 토큰을 통해 담긴 유저 정보 받아오기
-        author = request.user
-        ## 인증 여부 확인
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         interest = self.get_interest(request, interest_id)
         serializer = InterestSerializer(interest, data=request.data)
-        if serializer.is_valid(raise_exception=True):
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         summary="관심사 삭제",
@@ -259,13 +242,9 @@ class InterestDetailView(APIView):
         responses={204: "No Content", 401: "Unauthorized", 404: "Not Found"},
     )
     def delete(self, request, interest_id):
-        ## 토큰을 통해 담긴 유저 정보 받아오기
-        author = request.user
-        ## 인증 여부 확인
-        if not author.is_authenticated:
-            return Response(
-                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
-            )
+        error = login_required_response(request)
+        if error:
+            return error
 
         interest = self.get_interest(request, interest_id)
         interest.delete()
