@@ -96,8 +96,8 @@ class DjangoNoticeRepository:
         if self.source_override is not None:
             return self.source_override
         site = self.config.site(source_id)
-        source, _ = NoticeSource.objects.get_or_create(
-            url=site.url,
+        source, _ = NoticeSource.resolve(
+            site.url,
             defaults={
                 "name": site.name,
             },

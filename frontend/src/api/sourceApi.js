@@ -69,8 +69,9 @@ export async function updateSourceName(sourceId, name) {
   };
 }
 
-// 지원 사이트 카탈로그: config 기반 목록.
-// 백엔드: [{ name, url, category, subscribed: bool, source_id: int|null }]
+// 지원 사이트 카탈로그: config 기반 목록 + 사용자가 추가해 공개된 커스텀 사이트.
+// 백엔드: [{ name, url, category, favicon_url, source_id, subscribed, custom }]
+// custom=true 는 다른 사용자가 URL로 직접 등록해 발견 가능해진 사이트.
 function normalizeCatalogItem(item) {
   const url = item.url ?? "";
   const name = (item.name && item.name.trim()) || displayNameFromUrl(url);
@@ -81,6 +82,7 @@ function normalizeCatalogItem(item) {
     subscribed: item.subscribed ?? false,
     sourceId: item.source_id ?? null,
     faviconUrl: item.favicon_url ?? "",
+    custom: item.custom ?? false,
   };
 }
 

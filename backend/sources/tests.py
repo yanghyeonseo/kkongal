@@ -87,7 +87,7 @@ class CatalogViewTests(TestCase):
         item = response.data[0]
         self.assertEqual(
             set(item.keys()),
-            {"name", "url", "category", "favicon_url", "subscribed", "source_id"},
+            {"name", "url", "category", "favicon_url", "subscribed", "source_id", "custom"},
         )
         # 카탈로그 항목은 URL 로부터 계산한 파비콘을 담는다(네트워크 없음).
         by_url = {entry["url"]: entry for entry in response.data}

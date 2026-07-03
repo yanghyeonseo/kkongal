@@ -125,6 +125,10 @@ def run_sync_for_source(user, source, config) -> dict:
             newly = Notice.objects.filter(source_id=source).exclude(id__in=pre_ids)
             _enrich_new_notices(newly)
 
+        # 크롤 성공 시(레시피 확정) AI 로 사이트 이름/카테고리를 1회 채운다 → 카탈로그 공유용.
+        if crawled:
+            _autofill_source_metadata(source)
+
     # 이 source 의 가장 최근 공지 최대 10건을 요청 사용자에 대해서만 선별(비용 최소화).
     recent_notices = _notices_to_classify(source)
     summary = classify_notices_for_user(user, recent_notices)
@@ -182,6 +186,22 @@ def _crawl_recent(config, site, source):
     )
     service = NoticeCrawlService(config=config, repository=repository)
     return service.crawl_source(source, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP)
+
+
+def _autofill_source_metadata(source):
+    """AI 로 사이트 이름/카테고리를 채운다(이미 채웠으면 no-op). 실패는 조용히 넘긴다.
+
+    ai_naming 미배포/LLM 실패가 동기화 자체를 막지 않도록 방어한다(best-effort).
+    """
+    try:
+        from .ai_naming import autofill_source_metadata
+    except Exception:
+        log.debug("ai_naming 미배포 — 사이트 메타 자동채움 건너뜀")
+        return
+    try:
+        autofill_source_metadata(source)
+    except Exception:  # noqa: BLE001 - 자동채움 실패가 동기화를 실패로 만들지 않도록 방어
+        log.exception("사이트 메타 자동채움 실패 (source=%s)", getattr(source, "id", None))
 
 
 def _enrich_new_notices(notices):

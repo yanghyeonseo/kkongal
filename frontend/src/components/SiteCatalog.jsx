@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Check, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Check, Loader2, RefreshCw, User } from "lucide-react";
 import { getSourceCatalog } from "../api/sourceApi.js";
 import SourceFavicon from "./SourceFavicon.jsx";
 
@@ -20,13 +20,22 @@ const CATEGORY_LABELS = {
  * - 카탈로그는 자체 로드(GET /api/sources/catalog/)하고, 카테고리 필터를 제공한다.
  * - 구독 여부(isSubscribed)와 토글 동작(onToggle)은 부모가 진리원본으로 제어한다.
  *   onToggle(item, nextSubscribed) => Promise
+ * - onCatalogLoaded(catalog) — 선택적. 로드가 끝날 때마다 전체 목록을 부모에도 전달해
+ *   (예: 어떤 url 이 builtin 인지 판단) 별도의 중복 fetch 없이 재사용할 수 있게 한다.
  */
-function SiteCatalog({ isSubscribed, onToggle }) {
+function SiteCatalog({ isSubscribed, onToggle, onCatalogLoaded }) {
   const [catalog, setCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeCat, setActiveCat] = useState("all");
   const [busyUrl, setBusyUrl] = useState(null);
+
+  // onCatalogLoaded 는 부모가 매 렌더마다 새 함수를 넘길 수 있어 ref 로 최신값만
+  // 추적한다(load 의 effect 의존성에 넣으면 매 렌더 재요청이 발생하므로 피한다).
+  const onCatalogLoadedRef = useRef(onCatalogLoaded);
+  useEffect(() => {
+    onCatalogLoadedRef.current = onCatalogLoaded;
+  }, [onCatalogLoaded]);
 
   const load = async () => {
     setLoading(true);
@@ -34,8 +43,12 @@ function SiteCatalog({ isSubscribed, onToggle }) {
     try {
       const data = await getSourceCatalog();
       setCatalog(data);
+      onCatalogLoadedRef.current?.(data);
     } catch (err) {
       setError(err.message || "지원 사이트 목록을 불러오지 못했어요.");
+      // 카탈로그 로드 실패 시에도 부모의 "내가 추가한 사이트"가 영원히 로딩에 멈추지
+      // 않도록 빈 목록을 통지한다(그쪽은 sources 만으로 렌더 가능).
+      onCatalogLoadedRef.current?.([]);
     } finally {
       setLoading(false);
     }
@@ -131,7 +144,18 @@ function SiteCatalog({ isSubscribed, onToggle }) {
                 className="catalogLogo"
               />
               <div className="catalogInfo">
-                <strong>{item.name}</strong>
+                <div className="catalogNameRow">
+                  <strong>{item.name}</strong>
+                  {item.custom && (
+                    <span
+                      className="catalogCustomBadge"
+                      title="사용자가 직접 등록해 공개된 사이트예요"
+                    >
+                      <User size={10} aria-hidden="true" />
+                      커스텀
+                    </span>
+                  )}
+                </div>
                 <span className="catalogCat">
                   {CATEGORY_LABELS[item.category] || item.category}
                 </span>

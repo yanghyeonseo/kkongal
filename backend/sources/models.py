@@ -23,7 +23,16 @@ class NoticeSource(models.Model):
 
     # 사람이 읽는 표시명(사용자 편집 가능). 등록 시 카탈로그 이름이나 도메인에서 채운다.
     name = models.CharField(max_length=128, blank=True)
+    # 사용자가 처음 등록한 원본 URL(실제 fetch 대상). 표기 차이를 흡수하려면 normalized_url 을 쓴다.
     url = models.URLField(max_length=1024, unique=True)
+    # 정규화 URL — 같은 게시판을 하나로 모으는 dedup 키(unique). 등록 시 url 에서 계산한다.
+    # 이 키로 NoticeSource 를 get_or_create 하므로, 표기만 다른 같은 사이트는 하나로 합쳐지고
+    # 먼저 학습된 크롤 레시피(extraction_profile)를 다음 구독자가 그대로 재사용한다.
+    normalized_url = models.URLField(max_length=1024, unique=True, blank=True)
+    # 카테고리(도메인). 카탈로그 필터에 쓴다. 첫 크롤 확정 시 AI 가 채우며, 미분류는 "etc".
+    category = models.CharField(max_length=32, blank=True, default="etc")
+    # AI 로 name/category 를 이미 채웠는지. True 면 매 동기화마다 다시 LLM 을 부르지 않는다.
+    ai_named = models.BooleanField(default=False)
     # 사이트 파비콘 URL. 등록 시 Google s2 서비스로 계산해 저장한다(사이트를 직접 받지 않음).
     favicon_url = models.URLField(max_length=1024, blank=True)
     crawl_interval_minutes = models.IntegerField(default=60)
@@ -46,8 +55,37 @@ class NoticeSource(models.Model):
     # 마지막으로 1건 이상 추출에 성공한 시각. 프로파일이 stale(0건 반복)해지면 재학습 판단에 쓴다.
     last_extract_ok_at = models.DateTimeField(null=True, blank=True)
 
+    def save(self, *args, **kwargs):
+        # 어떤 생성 경로(직접 create 포함)든 normalized_url 이 비지 않도록 보장한다.
+        # unique 제약이 걸린 컬럼이라 "" 가 여러 개면 충돌하기 때문.
+        if not self.normalized_url and self.url:
+            from .url_normalize import normalize_url
+
+            self.normalized_url = normalize_url(self.url) or self.url
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.name
+
+    @property
+    def is_recipe_confirmed(self) -> bool:
+        """크롤 레시피가 확정(첫 성공 크롤로 학습)됐는지. 카탈로그 공유 기준."""
+        return bool(self.scraper_kind)
+
+    @classmethod
+    def resolve(cls, url: str, *, defaults: dict | None = None):
+        """정규화 URL 을 키로 NoticeSource 를 가져오거나 만든다(같은 게시판 = 하나의 소스).
+
+        표기만 다른 같은 사이트가 하나로 합쳐지므로, 먼저 학습된 크롤 레시피를 다음
+        구독자가 그대로 재사용한다(사용자 증가 = 자연 스케일링). (source, created) 반환.
+        """
+        from .url_normalize import normalize_url
+
+        key = normalize_url(url) or url
+        create_defaults = dict(defaults or {})
+        create_defaults["url"] = create_defaults.get("url", url)
+        create_defaults["normalized_url"] = key
+        return cls.objects.get_or_create(normalized_url=key, defaults=create_defaults)
 
 
 class SourceSubscription(models.Model):
