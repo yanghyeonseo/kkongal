@@ -6,7 +6,7 @@ from typing import Iterable
 
 from ..config_loader import Defaults, SiteConfig
 from ..schemas import RawNotice
-from .base import ScrapeContext, extract_body_text, first_text, make_notice, safe_href, take
+from .base import ScrapeContext, extract_body_text, find_row_date, first_text, make_notice, safe_href, take
 
 BODY_SELECTORS = [
     ".view-content",
@@ -55,12 +55,14 @@ def parse_html(html: str, site: SiteConfig, defaults: Defaults) -> list[RawNotic
         if not url or not NOTICE_URL_RE.search(url):
             continue
         title = first_text(link)
-        date_node = row.select_one(".date, .td-date, time, td:nth-of-type(4), td:nth-of-type(5)")
+        # 목록 행의 날짜는 클래스 없는 trailing <span>(예: "2026/7/01")에 있어
+        # 고정 셀렉터로는 안 잡힌다 → 순수 날짜 셀을 찾아낸다.
+        posted_at = find_row_date(row, selectors=(".date", ".td-date", "time"))
         notice = make_notice(
             site_id=site.id,
             title=title,
             url=url,
-            posted_at=first_text(date_node) or None,
+            posted_at=posted_at,
         )
         if notice:
             out.append(notice)

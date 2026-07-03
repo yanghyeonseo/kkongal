@@ -9,6 +9,7 @@ from unittest import mock
 import httpx
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -17,8 +18,10 @@ from notices.models import InboxNotice, Notice
 from sources.models import NoticeSource
 
 from .models import AlertChannel, AlertLog
+from .senders import send_channel_connected_async
 from .serializers import AlertChannelSerializer
 from .service import dispatch_pending
+from .throttling import TestSendRateThrottle
 
 User = get_user_model()
 
@@ -376,14 +379,17 @@ class TestSendEndpointTests(AlertTestBase):
     def setUp(self):
         super().setUp()
         self.client = APIClient()
+        # throttle 은 (설정이 없으면) 프로세스 공유 LocMemCache 를 쓰므로 테스트 간
+        # 상태가 남을 수 있다. 각 테스트가 깨끗한 한도에서 시작하도록 초기화한다.
+        cache.clear()
 
     def _url(self, channel_id):
         return f"/api/alert-channels/{channel_id}/test/"
 
-    def test_owner_email_test_send_ignores_config_address(self):
-        # M4: 테스트 발송은 사용자 지정 config.address 를 무시하고 반드시 회원
-        # 이메일로만 간다(임의 수신자 대상 증폭기 악용 방지).
-        channel = self.make_channel("email", config={"address": "attacker@evil.com"})
+    def test_owner_email_test_send_uses_config_address(self):
+        # 테스트 발송은 사용자가 이 채널에 등록한 주소(config.address)로 가야 한다.
+        # 사용자가 확인하려는 바로 그 주소로 도착해야 "테스트가 안 온다"가 해결된다.
+        channel = self.make_channel("email", config={"address": "dest@example.com"})
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(self._url(channel.id))
@@ -392,11 +398,39 @@ class TestSendEndpointTests(AlertTestBase):
         self.assertTrue(response.data["ok"])
         self.assertEqual(response.data["error"], "")
         self.assertEqual(len(mail.outbox), 1)
-        # config.address 가 아니라 회원 이메일로 발송되어야 한다
-        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+        # 회원 이메일(alice@example.com)이 아니라 등록 주소로 발송되어야 한다.
+        self.assertEqual(mail.outbox[0].to, ["dest@example.com"])
         self.assertIn("테스트", mail.outbox[0].subject)
-        # 테스트 발송은 AlertLog 를 남기지 않는다
+        # 테스트 발송은 AlertLog 를 남기지 않는다.
         self.assertEqual(AlertLog.objects.count(), 0)
+
+    def test_owner_email_test_send_falls_back_to_member_email(self):
+        # config.address 가 비어 있으면 회원 이메일로 폴백한다.
+        channel = self.make_channel("email", config={})
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(self._url(channel.id))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["ok"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    @mock.patch.object(TestSendRateThrottle, "rate", "2/min")
+    def test_test_send_is_rate_limited_per_user(self):
+        # 임의 수신자 대량발송 악용 방지: 사용자당 빈도를 제한한다. 한도 안에서는
+        # 200, 초과하면 429(Too Many Requests) 를 돌려준다.
+        channel = self.make_channel("email", config={"address": "dest@example.com"})
+        self.client.force_authenticate(user=self.user)
+
+        for _ in range(2):
+            ok_resp = self.client.post(self._url(channel.id))
+            self.assertEqual(ok_resp.status_code, 200)
+
+        throttled = self.client.post(self._url(channel.id))
+        self.assertEqual(throttled.status_code, 429)
+        # 한도 내 2건만 실제 발송되고 초과분은 발송되지 않는다.
+        self.assertEqual(len(mail.outbox), 2)
 
     @mock.patch("alert.senders.httpx.post")
     def test_owner_slack_test_send(self, mock_post):
@@ -445,7 +479,14 @@ class TestSendEndpointTests(AlertTestBase):
 
 @override_settings(EMAIL_BACKEND=LOCMEM_EMAIL)
 class ChannelCreateConfirmationTests(AlertTestBase):
-    """채널 생성 시 연동 확인 메시지 발송 (locmem 이메일 / httpx 목)."""
+    """채널 생성 응답 계약: 즉시 201 + best-effort confirmation, 발송은 논블로킹.
+
+    연동 확인 발송이 SMTP 왕복을 기다리며 요청을 막으면 '추가' 버튼이 무한
+    로딩된다(원래 버그). 그래서 뷰는 백그라운드 발송(send_channel_connected_async)
+    만 트리거하고 즉시 반환한다. 여기서는 그 '트리거 + 즉시 응답' 계약을 검증하고,
+    실제 발송(수신자/webhook)은 아래 ConnectedAsyncSendTests 에서 스레드를 join 해
+    결정적으로 검증한다.
+    """
 
     def setUp(self):
         super().setUp()
@@ -454,7 +495,8 @@ class ChannelCreateConfirmationTests(AlertTestBase):
 
     URL = "/api/alert-channels/"
 
-    def test_email_channel_create_sends_confirmation_to_config_address(self):
+    @mock.patch("alert.views.send_channel_connected_async")
+    def test_email_create_returns_201_and_triggers_async_send(self, mock_async):
         response = self.client.post(
             self.URL,
             {"type": "email", "config": {"address": "dest@example.com"}},
@@ -462,34 +504,23 @@ class ChannelCreateConfirmationTests(AlertTestBase):
         )
 
         self.assertEqual(response.status_code, 201)
+        # confirmation 은 실제 도착이 아니라 'best-effort 로 발송 시도 중' 상태.
+        self.assertTrue(response.data["confirmation"]["pending"])
         self.assertTrue(response.data["confirmation"]["ok"])
         self.assertEqual(response.data["confirmation"]["error"], "")
-        # 이메일 확인은 채널에 설정된 주소로 발송된다.
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].to, ["dest@example.com"])
-        self.assertIn("연동", mail.outbox[0].subject)
         # 채널이 실제로 생성됨.
-        self.assertTrue(AlertChannel.objects.filter(id=response.data["id"]).exists())
-        # 연동 확인은 실제 알림이 아니므로 AlertLog 를 남기지 않는다.
-        self.assertEqual(AlertLog.objects.count(), 0)
+        channel_id = response.data["id"]
+        self.assertTrue(AlertChannel.objects.filter(id=channel_id).exists())
+        # 발송은 동기 SMTP 가 아니라 백그라운드로 위임된다(무한로딩 방지). 뷰는
+        # SMTP 왕복을 기다리지 않으므로 이 시점에 outbox 는 비어 있어야 한다.
+        self.assertEqual(len(mail.outbox), 0)
+        mock_async.assert_called_once()
+        sent_channel, sent_user = mock_async.call_args.args
+        self.assertEqual(sent_channel.id, channel_id)
+        self.assertEqual(sent_user, self.user)
 
-    def test_email_confirmation_falls_back_to_member_email(self):
-        response = self.client.post(
-            self.URL,
-            {"type": "email", "config": {}},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertTrue(response.data["confirmation"]["ok"])
-        self.assertEqual(len(mail.outbox), 1)
-        # config.address 가 없으면 회원 이메일로 폴백.
-        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
-
-    @mock.patch("alert.senders.httpx.post")
-    def test_slack_channel_create_sends_confirmation(self, mock_post):
-        mock_post.return_value = make_slack_response(200, "ok")
-
+    @mock.patch("alert.views.send_channel_connected_async")
+    def test_slack_create_returns_201_and_triggers_async_send(self, mock_async):
         response = self.client.post(
             self.URL,
             {
@@ -500,32 +531,88 @@ class ChannelCreateConfirmationTests(AlertTestBase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertTrue(response.data["confirmation"]["ok"])
+        self.assertTrue(response.data["confirmation"]["pending"])
+        mock_async.assert_called_once()
+
+    @mock.patch(
+        "alert.views.send_channel_connected_async",
+        side_effect=RuntimeError("thread spawn failed"),
+    )
+    def test_async_trigger_failure_never_500s_creation(self, _mock_async):
+        # 백그라운드 발송 트리거 단계에서 예외가 나도 채널 생성은 500 이 아니라
+        # 201 로 성공해야 한다(발송 실패가 절대 생성을 막지 않는다).
+        response = self.client.post(
+            self.URL,
+            {"type": "email", "config": {"address": "dest@example.com"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data.get("id"))
+        self.assertFalse(response.data["confirmation"]["ok"])
+        self.assertFalse(response.data["confirmation"]["pending"])
+        self.assertTrue(AlertChannel.objects.filter(id=response.data["id"]).exists())
+
+
+@override_settings(EMAIL_BACKEND=LOCMEM_EMAIL)
+class ConnectedAsyncSendTests(AlertTestBase):
+    """send_channel_connected_async: 백그라운드 스레드에서 실제 발송을 수행한다.
+
+    스레드를 join 해 결과를 결정적으로 검증한다(운영에서는 join 하지 않음). 스레드는
+    ORM 을 건드리지 않으므로(channel/user 는 이미 로드됨) DB 커넥션 이슈가 없다.
+    """
+
+    def test_async_email_delivers_to_config_address(self):
+        channel = self.make_channel("email", config={"address": "dest@example.com"})
+
+        thread = send_channel_connected_async(channel, self.user)
+        thread.join(timeout=5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(mail.outbox), 1)
+        # 연동 확인도 등록 주소로 발송된다(회원 이메일이 아님).
+        self.assertEqual(mail.outbox[0].to, ["dest@example.com"])
+        self.assertIn("연동", mail.outbox[0].subject)
+        # 연동 확인은 실제 공지 알림이 아니므로 AlertLog 를 남기지 않는다.
+        self.assertEqual(AlertLog.objects.count(), 0)
+
+    def test_async_email_falls_back_to_member_email(self):
+        channel = self.make_channel("email", config={})
+
+        thread = send_channel_connected_async(channel, self.user)
+        thread.join(timeout=5)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["alice@example.com"])
+
+    @mock.patch("alert.senders.httpx.post")
+    def test_async_slack_uses_registered_webhook(self, mock_post):
+        mock_post.return_value = make_slack_response(200, "ok")
+        channel = self.make_channel(
+            "slack", config={"webhook_url": "https://hooks.slack.com/services/A/B/C"}
+        )
+
+        thread = send_channel_connected_async(channel, self.user)
+        thread.join(timeout=5)
+
         mock_post.assert_called_once()
         self.assertEqual(
             mock_post.call_args.args[0], "https://hooks.slack.com/services/A/B/C"
         )
 
-    @mock.patch("alert.senders.httpx.post")
-    def test_confirmation_failure_does_not_block_creation(self, mock_post):
-        # 슬랙 발송이 예외로 실패해도 채널 생성은 성공해야 한다.
-        mock_post.side_effect = httpx.ConnectError("boom")
-
-        response = self.client.post(
-            self.URL,
-            {
-                "type": "slack",
-                "config": {"webhook_url": "https://hooks.slack.com/services/X/Y/Z"},
-            },
-            format="json",
+    @mock.patch("alert.senders.httpx.post", side_effect=httpx.ConnectError("boom"))
+    def test_async_send_failure_is_swallowed_not_raised(self, _mock_post):
+        # 발송 실패(예외)가 스레드 밖으로 전파되지 않아야 한다(프로세스 안전).
+        channel = self.make_channel(
+            "slack", config={"webhook_url": "https://hooks.slack.com/services/X/Y/Z"}
         )
 
-        # 채널은 여전히 201 로 생성되고, confirmation.ok 만 False.
-        self.assertEqual(response.status_code, 201)
-        self.assertIsNotNone(response.data.get("id"))
-        self.assertFalse(response.data["confirmation"]["ok"])
-        self.assertTrue(response.data["confirmation"]["error"])
-        self.assertTrue(AlertChannel.objects.filter(id=response.data["id"]).exists())
+        thread = send_channel_connected_async(channel, self.user)
+        thread.join(timeout=5)
+
+        # 스레드가 예외 없이 정상 종료(로그만 남김).
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(mail.outbox), 0)
 
 
 class AlertChannelSerializerValidationTests(TestCase):

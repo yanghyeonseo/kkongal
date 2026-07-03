@@ -16,6 +16,9 @@ class Notice(models.Model):
     hash = models.CharField(max_length=256, blank=True)
     title = models.CharField(max_length=256)
     content = models.TextField(blank=True)
+    # AI 보강(enrichment) 산출물 — 공지당 1회 채운다(ai/enrich.py). 사용자 무관.
+    summary = models.TextField(blank=True)  # 한국어 3문장 요약
+    content_markdown = models.TextField(blank=True)  # 원문 정보를 보존한 깔끔한 markdown
     publisher = models.CharField(max_length=128, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     deadline_at = models.DateTimeField(null=True, blank=True)

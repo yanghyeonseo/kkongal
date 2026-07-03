@@ -26,6 +26,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--crawl", action="store_true", help="라이브 크롤링부터 시작(느림, 외부 사이트 의존)")
+        parser.add_argument("--no-enrich", action="store_true", help="공지 보강(마감일/요약/마크다운) 단계 건너뛰기")
         parser.add_argument("--no-classify", action="store_true", help="AI 선별 단계 건너뛰기")
         parser.add_argument("--no-dispatch", action="store_true", help="알림 발송 단계 건너뛰기")
         parser.add_argument("--source", help="크롤/선별을 특정 출처로 제한(옵션)")
@@ -41,6 +42,23 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"  '{command}' 단계 실패: {exc!r}"))
             return False
 
+    def _enrich_step(self) -> bool:
+        """신규(미보강) 공지에 공지당 1회 AI 보강(마감일/요약/마크다운)."""
+        self.stdout.write(self.style.MIGRATE_HEADING("\n▶ 공지 보강 (enrich_notices)"))
+        try:
+            from ai.enrich import enrich_notices
+            from notices.models import Notice
+
+            pending = list(
+                Notice.objects.filter(summary="").order_by("-id")[:200]
+            )
+            summary = enrich_notices(pending)
+            self.stdout.write(f"  대상 {len(pending)}건 · {summary}")
+            return True
+        except Exception as exc:  # noqa: BLE001 - 단계 격리
+            self.stderr.write(self.style.ERROR(f"  enrich 단계 실패: {exc!r}"))
+            return False
+
     def handle(self, *args, **opts):
         ok = True
 
@@ -51,6 +69,9 @@ class Command(BaseCommand):
                 "크롤링 (crawl_notices, --no-match)", "crawl_notices",
                 source=opts.get("source"), no_match=True,
             ) and ok
+
+        if not opts["no_enrich"]:
+            ok = self._enrich_step() and ok
 
         if not opts["no_classify"]:
             ok = self._step(

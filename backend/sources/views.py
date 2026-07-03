@@ -1,6 +1,5 @@
 import logging
 from datetime import timedelta
-from urllib.parse import urlparse
 
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
@@ -17,7 +16,10 @@ from crawler.service import NoticeCrawlService
 from notices.models import Notice
 
 from .models import NoticeSource, SourceSubscription
+from .naming import favicon_url_for, friendly_name_for
 from .serializers import (
+    NoticeSourceNameUpdateSerializer,
+    NoticeSourceSerializer,
     SourceSubscriptionCreateSerializer,
     SourceSubscriptionSerializer,
 )
@@ -29,8 +31,9 @@ log = logging.getLogger("sources")
 _SYNC_RATE_LIMIT_SECONDS = 30
 # 한 번의 동기화에서 AI 선별로 넘길 공지 최대 수(LLM 비용 상한).
 _SYNC_CLASSIFY_CAP = 10
-# '최근 공지' 판단 창(시간).
-_SYNC_RECENT_HOURS = 24
+# 온디맨드 스크랩 창: 최근 N일 이내 공지를 최대 M건까지 가져온다.
+_SYNC_RECENT_DAYS = 7
+_SYNC_FETCH_CAP = 20
 _UNSUPPORTED_MESSAGE = "이 사이트는 자동 수집을 지원하지 않아요."
 
 
@@ -77,15 +80,19 @@ class SourceSubscriptionListView(APIView):
 
         serializer = SourceSubscriptionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        validated_data = serializer.validated_data
+        url = serializer.validated_data["url"]
 
-        # parsed_url = urlparse(validated_data["url"])
-        # source_name = parsed_url.netloc or validated_data["url"]
-
-        source, source_created = NoticeSource.objects.get_or_create(
-            url=validated_data["url"],
-            # defaults={"name": source_name},
+        # 표시명/파비콘은 URL 만으로 결정한다(사이트를 직접 받지 않아 등록이 빠르고 안전).
+        config = load_config()
+        source, _source_created = NoticeSource.objects.get_or_create(
+            url=url,
+            defaults={
+                "name": friendly_name_for(url, config),
+                "favicon_url": favicon_url_for(url),
+            },
         )
+        # 크롤러가 먼저 만든 source 는 표시명/파비콘이 비어 있을 수 있다 → 등록 시 채운다.
+        self._backfill_source(source, config)
 
         subscription, subscription_created = SourceSubscription.objects.get_or_create(
             user_id=author,
@@ -98,6 +105,19 @@ class SourceSubscriptionListView(APIView):
             SourceSubscriptionSerializer(subscription).data,
             status=response_status,
         )
+
+    @staticmethod
+    def _backfill_source(source, config):
+        """빈 표시명/파비콘을 URL 기반으로 채운다(네트워크 없음). 바뀐 것만 저장."""
+        updates = {}
+        if not source.name:
+            updates["name"] = friendly_name_for(source.url, config)
+        if not source.favicon_url:
+            updates["favicon_url"] = favicon_url_for(source.url)
+        if updates:
+            for field, value in updates.items():
+                setattr(source, field, value)
+            source.save(update_fields=list(updates))
 
 
 class SourceSubscriptionDetailView(APIView):
@@ -159,6 +179,7 @@ class SourceCatalogView(APIView):
                 "name": site.name,
                 "url": site.url,
                 "category": site.category,
+                "favicon_url": favicon_url_for(site.url),
                 "source_id": source_id_by_url.get(site.url),
                 "subscribed": source_id_by_url.get(site.url)
                 in subscribed_source_ids,
@@ -168,12 +189,58 @@ class SourceCatalogView(APIView):
         return Response(catalog, status=status.HTTP_200_OK)
 
 
+class SourceDetailView(APIView):
+    @extend_schema(
+        summary="사이트 표시명 편집",
+        description=(
+            "구독한 사이트의 사람이 읽는 표시명(name)을 변경합니다. 인증 및 해당 "
+            "사이트 구독이 필요하며, name 은 비어 있지 않고 128자 이하여야 합니다. "
+            "갱신된 사이트를 반환합니다."
+        ),
+        request=NoticeSourceNameUpdateSerializer,
+        responses={
+            200: NoticeSourceSerializer,
+            400: "Bad Request",
+            401: "Unauthorized",
+            403: "구독자가 아님",
+            404: "Not Found",
+        },
+    )
+    def patch(self, request, source_id):
+        user = request.user
+        if not user.is_authenticated:
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        source = get_object_or_404(NoticeSource, id=source_id)
+
+        # 구독한 사이트만 표시명을 바꿀 수 있다.
+        if not SourceSubscription.objects.filter(
+            user_id=user, source_id=source
+        ).exists():
+            return Response(
+                {"detail": "구독한 사이트만 편집할 수 있어요."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = NoticeSourceNameUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        source.name = serializer.validated_data["name"]
+        source.save(update_fields=["name"])
+        return Response(
+            NoticeSourceSerializer(source).data, status=status.HTTP_200_OK
+        )
+
+
 class SourceSyncView(APIView):
     @extend_schema(
         summary="사이트 온디맨드 동기화",
         description=(
-            "구독한 사이트를 즉시 크롤링하고 최근 공지(최대 10건)를 요청 사용자에 대해 "
-            "AI 선별합니다. 최근 30초 내 크롤 이력이 있으면 재크롤 없이 기존 미분류 공지만 "
+            "구독한 사이트에서 최근 7일 이내 공지를 최대 20건 스크랩하고, 그중 가장 최근 "
+            "10건을 요청 사용자에 대해 AI 선별합니다. 신규 공지는 저장 시 공지당 1회 "
+            "보강(enrich)합니다. 최근 30초 내 크롤 이력이 있으면 재크롤 없이 기존 공지만 "
             "재선별하고, 자동 수집 미지원 사이트는 400 을 반환합니다. 라이브 사이트 장애 "
             "시에도 500 대신 crawled=false 와 안내 메시지를 담아 200 으로 응답합니다."
         ),
@@ -223,28 +290,33 @@ class SourceSyncView(APIView):
         ) < timedelta(seconds=_SYNC_RATE_LIMIT_SECONDS)
 
         if not rate_limited:
-            # 순진한 매처는 OFF(match_inbox=False) — inbox 편입은 AI 선별만 담당.
+            # 크롤 전 기존 공지 id 스냅샷 → 이후 '이번에 새로 생긴' 공지만 골라 보강한다.
+            pre_ids = set(
+                Notice.objects.filter(source_id=source).values_list("id", flat=True)
+            )
             try:
-                repository = DjangoNoticeRepository(
-                    config=config, match_inbox=False
-                )
-                service = NoticeCrawlService(
-                    config=config, repository=repository
-                )
-                report = service.crawl_site(site.id)
+                report = self._crawl_recent(config, site)
+            except Exception:  # 방어: 어떤 경우에도 500 대신 graceful 200.
+                log.exception("sync 크롤 실패 (source=%s)", source.id)
+                crawl_failed = True
+            else:
                 fetched = report.fetched
                 new_notices = report.inserted
-                # crawl_site 는 스크래이핑 예외를 report.errors 로 삼킨다. 아무것도 못
+                # crawl 은 스크래이핑 예외를 report.errors 로 삼킨다. 아무것도 못
                 # 가져오고 에러만 있으면 라이브 사이트 장애로 보고 graceful 처리한다.
                 if report.errors and report.fetched == 0:
                     crawl_failed = True
                 else:
                     crawled = True
-            except Exception:  # 방어: 어떤 경우에도 500 대신 graceful 200.
-                log.exception("sync 크롤 실패 (source=%s)", source.id)
-                crawl_failed = True
 
-        # 이 source 의 최근 공지 최대 10건을 요청 사용자에 대해서만 선별(비용 최소화).
+            # 이번에 새로 저장된 공지에 한해 공지당 1회 보강(있으면).
+            if crawled and new_notices:
+                newly = Notice.objects.filter(source_id=source).exclude(
+                    id__in=pre_ids
+                )
+                self._enrich_new_notices(newly)
+
+        # 이 source 의 가장 최근 공지 최대 10건을 요청 사용자에 대해서만 선별(비용 최소화).
         recent_notices = self._notices_to_classify(source)
         summary = classify_notices_for_user(user, recent_notices)
         inbox_added = int(summary.get("created", 0))
@@ -266,18 +338,47 @@ class SourceSyncView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @staticmethod
+    def _crawl_recent(config, site):
+        """최근 7일 이내 공지를 최대 20건 스크랩한다.
+
+        be-crawler 가 추가하는 ``NoticeCrawlService.crawl_recent`` 를 우선 쓰되, 아직
+        배포 전이면 기존 ``crawl_site`` 로 폴백해 이 파일이 항상 동작하게 한다.
+        순진한 매처는 OFF(match_inbox=False) — inbox 편입은 AI 선별만 담당.
+        """
+        repository = DjangoNoticeRepository(config=config, match_inbox=False)
+        service = NoticeCrawlService(config=config, repository=repository)
+        crawl_recent = getattr(service, "crawl_recent", None)
+        if callable(crawl_recent):
+            return crawl_recent(
+                site.id, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP
+            )
+        log.info("crawl_recent 미배포 — crawl_site 폴백 (source=%s)", site.id)
+        return service.crawl_site(site.id)
+
+    @staticmethod
+    def _enrich_new_notices(notices):
+        """신규 공지에 공지당 1회 보강 적용. ai.enrich 미배포/실패는 조용히 건너뛴다."""
+        notices = list(notices)
+        if not notices:
+            return
+        try:
+            from ai.enrich import enrich_notices  # 지연 import(미배포/순환 방어).
+        except Exception:
+            log.debug("ai.enrich 미배포 — 보강 건너뜀 (count=%d)", len(notices))
+            return
+        try:
+            enrich_notices(notices)
+        except Exception:  # 보강 실패가 동기화 자체를 막지 않도록 삼킨다.
+            log.exception("공지 보강 실패 (count=%d)", len(notices))
+
     def _notices_to_classify(self, source):
-        """이 source 공지 중 24h 이내 최신순 ≤10건. 없으면 최신 ≤10건으로 폴백."""
-        base = (
+        """이 source 공지 중 가장 최근 10건(게시일 우선, 없으면 생성일)."""
+        return list(
             Notice.objects.filter(source_id=source)
             .annotate(effective_at=Coalesce("published_at", "created_at"))
-            .order_by("-effective_at", "-id")
+            .order_by("-effective_at", "-id")[:_SYNC_CLASSIFY_CAP]
         )
-        cutoff = timezone.now() - timedelta(hours=_SYNC_RECENT_HOURS)
-        recent = list(base.filter(effective_at__gte=cutoff)[:_SYNC_CLASSIFY_CAP])
-        if not recent:
-            recent = list(base[:_SYNC_CLASSIFY_CAP])
-        return recent
 
     @staticmethod
     def _build_message(*, rate_limited, crawl_failed, inbox_added):

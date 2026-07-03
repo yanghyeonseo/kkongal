@@ -4,7 +4,7 @@ from typing import Iterable
 
 from ..config_loader import Defaults, SiteConfig
 from ..schemas import RawNotice
-from .base import ScrapeContext, extract_body_text, first_text, make_notice, safe_href, take
+from .base import ScrapeContext, extract_body_text, find_row_date, first_text, make_notice, safe_href, take
 
 BODY_SELECTORS = [
     ".bbs_contents",
@@ -35,11 +35,13 @@ def parse_html(html: str, site: SiteConfig, defaults: Defaults) -> list[RawNotic
         if not url:
             continue
         title = first_text(row.select_one(".title, .subject, strong")) or first_text(link)
+        # 게시일은 4번째 <td>(예: "2026-07-02")에 ISO 로 들어있다.
+        posted_at = find_row_date(row, selectors=(".date", "time", ".reg-date"))
         notice = make_notice(
             site_id=site.id,
             title=title,
             url=url,
-            posted_at=first_text(row.select_one(".date, time, .reg-date")) or None,
+            posted_at=posted_at,
         )
         if notice:
             out.append(notice)

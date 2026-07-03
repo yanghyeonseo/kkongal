@@ -84,10 +84,15 @@ def parse_html(html: str, site: SiteConfig, defaults: Defaults) -> list[RawNotic
         if company:
             title = _strip_company_prefix(title, company)
         title = _strip_orphan_bracket_prefix(title)
+        # HOT100 목록엔 절대 게시일이 없고 ".deadlines" 에 상대표현("6일 전 등록")이 있다.
+        # (".date" 는 마감일 D-N/~MM.DD 라 게시일이 아니다.) 상대표현은
+        # repository.parse_notice_datetime 이 절대 시각으로 환산한다.
+        posted_at = first_text(item.select_one(".support_detail .deadlines")) or None
         notice = make_notice(
             site_id=site.id,
             title=f"[{company}] {title}" if company else title,
             url=url,
+            posted_at=posted_at,
             summary=company or None,
         )
         if notice:

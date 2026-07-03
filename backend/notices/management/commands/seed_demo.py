@@ -89,6 +89,7 @@ class Command(BaseCommand):
 
         if opts["reset"]:
             Interest.objects.filter(user_id=user).delete()
+            AlertChannel.objects.filter(user_id=user).delete()
             # inbox rows for this user are removed via cascade when notices are removed;
             # remove demo notices explicitly
             Notice.objects.filter(publisher__in={n[3] for n in DEMO_NOTICES}).delete()
@@ -136,15 +137,21 @@ class Command(BaseCommand):
             made += int(created_notice)
         self.stdout.write(self.style.SUCCESS(f"notices: {made} new (of {len(DEMO_NOTICES)})"))
 
-        # email alert channel (destination = user's email)
-        AlertChannel.objects.get_or_create(
-            user_id=user, type=AlertChannel.ChannelType.EMAIL,
-            defaults={"config": {"address": user.email}, "is_active": True},
-        )
-        if opts["slack_webhook"]:
-            AlertChannel.objects.get_or_create(
+        # email alert channel (destination = user's email). filter-exists (not
+        # get_or_create) so pre-existing duplicates don't raise MultipleObjectsReturned.
+        if not AlertChannel.objects.filter(
+            user_id=user, type=AlertChannel.ChannelType.EMAIL
+        ).exists():
+            AlertChannel.objects.create(
+                user_id=user, type=AlertChannel.ChannelType.EMAIL,
+                config={"address": user.email}, is_active=True,
+            )
+        if opts["slack_webhook"] and not AlertChannel.objects.filter(
+            user_id=user, type=AlertChannel.ChannelType.SLACK
+        ).exists():
+            AlertChannel.objects.create(
                 user_id=user, type=AlertChannel.ChannelType.SLACK,
-                defaults={"config": {"webhook_url": opts["slack_webhook"]}, "is_active": True},
+                config={"webhook_url": opts["slack_webhook"]}, is_active=True,
             )
         self.stdout.write(self.style.SUCCESS("alert channels ready (email" + (" + slack" if opts["slack_webhook"] else "") + ")"))
 

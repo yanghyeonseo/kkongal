@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -5,13 +7,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AlertChannel, AlertLog
-from .senders import get_sender, send_channel_connected
+from .senders import get_sender, send_channel_connected_async
 from .serializers import (
     AlertChannelCreateResponseSerializer,
     AlertChannelSerializer,
     AlertChannelTestResponseSerializer,
     AlertLogSerializer,
 )
+from .throttling import TestSendRateThrottle
+
+logger = logging.getLogger("alert")
 
 
 class AlertChannelListView(APIView):
@@ -35,8 +40,10 @@ class AlertChannelListView(APIView):
         summary="알림 채널 생성",
         description=(
             "로그인한 사용자의 알림 채널 설정을 생성합니다. 생성 직후 해당 채널로 "
-            "연동 확인 메시지를 발송하며, 그 결과를 응답의 confirmation(ok/error) 에 "
-            "담아 반환합니다. 확인 메시지 발송이 실패해도 채널 생성은 성공합니다."
+            "연동 확인 메시지를 백그라운드에서 발송하며(논블로킹), 응답은 즉시 201 로 "
+            "반환합니다. confirmation 은 실제 도착 여부가 아니라 발송을 시도 중이라는 "
+            "best-effort 상태(pending=true)를 담습니다. 확인 메시지 발송이 실패해도 "
+            "채널 생성은 성공합니다."
         ),
         request=AlertChannelSerializer,
         responses={
@@ -55,11 +62,19 @@ class AlertChannelListView(APIView):
         serializer = AlertChannelSerializer(data=request.data)
         if serializer.is_valid(raise_exception=True):
             channel = serializer.save(user_id=author)
-            # 채널이 저장된 뒤 연동 확인 메시지를 보낸다. 발송이 실패해도 채널
-            # 생성은 성공이며, 결과는 confirmation 으로만 함께 내려준다.
-            ok, error = send_channel_connected(channel, author)
+            # 연동 확인 메시지는 SMTP 왕복이 느리거나 멈출 수 있어, 요청 스레드에서
+            # 동기로 보내면 '추가' 버튼이 무한 로딩된다(원래 버그). 따라서 발송은
+            # 백그라운드(데몬 스레드)에서 논블로킹으로 처리하고 응답은 즉시 201 로
+            # 돌려준다. confirmation 은 실제 도착 여부가 아니라 'best-effort 로 발송을
+            # 시도 중'이라는 상태(pending)만 담는다.
+            try:
+                send_channel_connected_async(channel, author)
+                confirmation = {"ok": True, "error": "", "pending": True}
+            except Exception:  # noqa: BLE001 - 백그라운드 발송 트리거 실패가 생성을 막지 않도록
+                logger.exception("연동 확인 발송 트리거 실패 (채널=%s)", channel.id)
+                confirmation = {"ok": False, "error": "", "pending": False}
             data = AlertChannelSerializer(channel).data
-            data["confirmation"] = {"ok": ok, "error": error}
+            data["confirmation"] = confirmation
             return Response(data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -174,18 +189,25 @@ class AlertLogListView(APIView):
 
 
 class AlertChannelTestView(APIView):
+    # 테스트 발송은 사용자가 등록한 주소(config.address)/webhook 으로 실제 메일·슬랙을
+    # 쏘므로, 임의 수신자 대량발송 악용을 막기 위해 사용자당 가벼운 rate-limit 을 건다.
+    # (인증된 본인 채널 한정이라 강한 제한은 불필요 — 오남용만 차단.)
+    throttle_classes = [TestSendRateThrottle]
+
     @extend_schema(
         summary="알림 채널 테스트 발송",
         description=(
-            "지정한 알림 채널로 친근한 테스트 메시지를 즉시 발송해 연결 상태를 "
-            "확인합니다. 실제 공지가 아닌 테스트이므로 AlertLog 는 남기지 않습니다. "
-            "응답의 ok 로 성공 여부를, error 로 실패 사유를 확인합니다."
+            "지정한 알림 채널의 등록 주소(이메일은 config.address, 없으면 회원 이메일 / "
+            "슬랙은 등록 webhook)로 친근한 테스트 메시지를 발송해 연결 상태를 확인합니다. "
+            "실제 공지가 아닌 테스트이므로 AlertLog 는 남기지 않습니다. 응답의 ok 로 "
+            "성공 여부를, error 로 실패 사유를 확인합니다. 사용자당 요청 빈도가 제한됩니다."
         ),
         request=None,
         responses={
             200: AlertChannelTestResponseSerializer,
             401: "Unauthorized",
             404: "Not Found",
+            429: "Too Many Requests",
         },
     )
     def post(self, request, channel_id):

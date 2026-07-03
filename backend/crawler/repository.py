@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, time
 from typing import Optional
 
-from dateutil import parser as date_parser
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
@@ -11,11 +10,18 @@ from notices.models import Notice
 from sources.models import NoticeSource
 
 from .config_loader import CrawlerConfig, load_config
+from .dateparse import parse_flexible
 from .matcher import match_notice_to_subscribers
 from .schemas import RawNotice
 
 
 def parse_notice_datetime(value: Optional[str]):
+    """스크래퍼가 넘긴 게시일 문자열을 tz-aware ``datetime`` 으로 변환한다.
+
+    ISO 는 빠른 경로로 처리하고, 그 외 사이트별 형식(``2026/7/01``,
+    ``2026.06.23 12:00:00``)과 상대표현(``6일 전 등록``)은 :func:`crawler.dateparse.parse_flexible`
+    로 위임한다.
+    """
     if not value:
         return None
 
@@ -29,11 +35,9 @@ def parse_notice_datetime(value: Optional[str]):
     if parsed_date:
         return timezone.make_aware(datetime.combine(parsed_date, time.min))
 
-    try:
-        guessed = date_parser.parse(value, fuzzy=True)
-    except (TypeError, ValueError, OverflowError):
+    guessed = parse_flexible(value)
+    if guessed is None:
         return None
-
     if timezone.is_naive(guessed):
         return timezone.make_aware(guessed)
     return guessed

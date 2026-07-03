@@ -3,8 +3,10 @@
 매 틱마다:
   1. **due 사이트만** 크롤(순진한 매처 OFF). due = ``crawled_at`` 이 그 사이트의
      ``crawl_interval_minutes``(기본 60) 보다 오래됐거나 아직 크롤한 적 없는 사이트.
-  2. 신규/미분류 공지를 모든 구독자에 대해 AI 선별(``classify_notices``).
-  3. 미발송 + 임계값 이상 inbox 를 활성 알림 채널로 발송(``dispatch_alerts``).
+  2. 이번 틱에 **새로 저장된 공지를 AI 보강**(``ai.enrich.enrich_notices`` — 요약/
+     markdown/마감일. 공지당 1회, 사용자 무관). 보강은 후속 선별의 입력이 된다.
+  3. 신규/미분류 공지를 모든 구독자에 대해 AI 선별(``classify_notices``).
+  4. 미발송 + 임계값 이상 inbox 를 활성 알림 채널로 발송(``dispatch_alerts``).
 
 비용 주의(NFR-6): 매 틱은 '새 공지'만 처리한다 — 중복 공지는 저장 단계에서 걸러지고,
 이미 AI 로 판정된 (공지,사용자) 쌍은 LLM 을 다시 호출하지 않는다. 그래도 상시 실행은
@@ -84,14 +86,44 @@ class Command(BaseCommand):
             time.sleep(sleep_seconds)
 
     def _tick(self):
+        # 크롤 전 시각을 잡아 이번 틱에 새로 저장된 공지만 보강 대상으로 삼는다.
+        tick_started = timezone.now()
         crawled = self._crawl_due_sources()
+        # 새 공지 AI 보강(요약/markdown/마감일) — 후속 선별의 입력이 된다.
+        enriched = self._enrich_new_notices(since=tick_started)
         # 신규/미분류 공지만 모든 구독자에 대해 선별(NFR-6 로 LLM 비용 상한).
         call_command("classify_notices", stdout=self.stdout, stderr=self.stderr)
         # 미발송 + 임계값 이상 inbox 를 활성 채널로 발송.
         call_command("dispatch_alerts", stdout=self.stdout, stderr=self.stderr)
         self.stdout.write(
-            self.style.SUCCESS(f"틱 완료 — 크롤한 사이트 {crawled}곳")
+            self.style.SUCCESS(f"틱 완료 — 크롤한 사이트 {crawled}곳, 보강 {enriched}건")
         )
+
+    def _enrich_new_notices(self, *, since) -> int:
+        """이번 틱에 새로 저장된 공지를 AI 보강한다.
+
+        ``ai.enrich.enrich_notices`` 는 BE-ai 가 계약 시그니처로 제공한다. 아직
+        코드가 없더라도 이 파일이 import 되도록 **함수 안에서 지연 import** 하고,
+        없으면 로그만 남기고 건너뛴다(보강은 best-effort). ``enrich_notices`` 자체가
+        멱등(이미 보강된 것 skip)이므로 재실행은 안전하다.
+        """
+        try:
+            from ai.enrich import enrich_notices
+        except Exception as exc:  # noqa: BLE001 - 모듈 미제공/임포트 오류는 건너뛴다.
+            log.warning("공지 보강(enrich) 모듈 사용 불가 — 건너뜀: %r", exc)
+            return 0
+
+        from notices.models import Notice
+
+        new_notices = list(Notice.objects.filter(created_at__gte=since))
+        if not new_notices:
+            return 0
+        try:
+            enrich_notices(new_notices)
+        except Exception:  # 보강 실패가 선별/발송을 막지 않도록
+            log.exception("공지 보강(enrich) 실패 — 계속 진행")
+            return 0
+        return len(new_notices)
 
     def _crawl_due_sources(self) -> int:
         due = self._due_sources()

@@ -4,8 +4,11 @@ from django.utils import timezone
 
 
 class NoticeSource(models.Model):
+    # 사람이 읽는 표시명(사용자 편집 가능). 등록 시 카탈로그 이름이나 도메인에서 채운다.
     name = models.CharField(max_length=128, blank=True)
     url = models.URLField(max_length=1024, unique=True)
+    # 사이트 파비콘 URL. 등록 시 Google s2 서비스로 계산해 저장한다(사이트를 직접 받지 않음).
+    favicon_url = models.URLField(max_length=1024, blank=True)
     crawl_interval_minutes = models.IntegerField(default=60)
     crawled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)

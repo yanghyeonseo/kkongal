@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     SourceCatalogView,
+    SourceDetailView,
     SourceSubscriptionDetailView,
     SourceSubscriptionListView,
     SourceSyncView,
@@ -21,4 +22,5 @@ urlpatterns = [
 sources_urlpatterns = [
     path("catalog/", SourceCatalogView.as_view(), name="catalog"),
     path("<int:source_id>/sync/", SourceSyncView.as_view(), name="sync"),
+    path("<int:source_id>/", SourceDetailView.as_view(), name="detail"),
 ]

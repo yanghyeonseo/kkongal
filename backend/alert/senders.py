@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import threading
 from dataclasses import dataclass
 
 import httpx
@@ -162,18 +163,16 @@ class EmailSender(BaseSender):
         )
 
     def send_test(self, user):
-        # 테스트 발송은 반드시 본인(회원) 이메일로만 보낸다. 사용자가 지정한
-        # config.address 로는 보내지 않아, 임의 수신자에게 메일을 쏘는 증폭기로
-        # 악용되는 것을 막는다(M4). 실제 dispatch 는 여전히 config.address 를 따른다.
-        recipient = (getattr(user, "email", "") or "").strip()
-        if not recipient:
-            return False, "회원 이메일이 없어 테스트를 보낼 수 없습니다"
+        # 테스트 발송은 사용자가 이 채널에 등록한 주소(config.address)로 보낸다.
+        # 없으면 회원 이메일로 폴백한다(_recipient). 사용자가 실제로 확인하려는
+        # 주소가 바로 그 주소이므로, 그 주소로 도착해야 "테스트 발송이 안 온다"는
+        # 문제가 해결된다. 임의 수신자 대량발송 악용은 테스트 엔드포인트의
+        # rate-limit(인증된 본인 채널 한정)으로 완화한다.
         return self._deliver(
             user,
             subject=f"[{BRAND}] 알림 채널 테스트 ✅",
             items=[_test_item()],
             intro="채널이 정상적으로 연결되었는지 확인하기 위한 테스트 메시지입니다.",
-            recipient=recipient,
         )
 
     def send_connected(self, user):
@@ -498,3 +497,43 @@ def send_channel_connected(channel, user) -> tuple[bool, str]:
             "연동 확인 발송 실패 (채널=%s, 타입=%s)", channel.id, channel.type
         )
         return False, f"{type(exc).__name__}: {exc}"
+
+
+def send_channel_connected_async(channel, user) -> threading.Thread:
+    """연동 확인 메시지를 백그라운드(데몬 스레드)에서 논블로킹으로 발송한다.
+
+    채널 생성 요청이 SMTP 왕복(느리거나 멈출 수 있음)을 기다리며 무한 로딩되지
+    않도록, 실제 발송은 별도 스레드에 맡기고 즉시 반환한다. 발송 결과는 서버
+    로그로만 남고 요청/응답을 막지 않는다(best-effort). 스레드는 ORM 을 건드리지
+    않으므로(channel/user 는 이미 메모리에 로드된 상태로 전달) 별도 DB 커넥션
+    정리가 필요 없다. 발송 자체의 타임아웃은 settings.EMAIL_TIMEOUT /
+    SLACK_TIMEOUT_SECONDS 가 backstop 으로 보장한다.
+
+    반환된 스레드는 테스트에서 ``join`` 해 결정적으로 검증할 수 있으나, 운영
+    코드는 그대로 버린다(daemon).
+    """
+
+    def _run():
+        try:
+            ok, error = send_channel_connected(channel, user)
+            if not ok:
+                logger.warning(
+                    "연동 확인 발송 실패 (채널=%s, 타입=%s): %s",
+                    channel.id,
+                    channel.type,
+                    error,
+                )
+        except Exception:  # noqa: BLE001 - 백그라운드 스레드가 조용히 죽지 않도록 방어
+            logger.exception(
+                "연동 확인 발송 스레드 오류 (채널=%s, 타입=%s)",
+                channel.id,
+                channel.type,
+            )
+
+    thread = threading.Thread(
+        target=_run,
+        name=f"alert-connected-{channel.id}",
+        daemon=True,
+    )
+    thread.start()
+    return thread

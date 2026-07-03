@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 from urllib.parse import urljoin
@@ -12,6 +13,13 @@ from ..config_loader import Defaults, SiteConfig
 from ..schemas import RawNotice
 
 log = logging.getLogger("crawler.parse")
+
+# 목록 셀 하나의 텍스트가 "순수 날짜"인지 판별한다(제목에 섞인 날짜와 구분).
+# 예: 2026/7/01, 2026-07-02, 2026.07.02, 2026-07-02 14:30
+_PURE_DATE_RE = re.compile(
+    r"^\s*20\d{2}\s*[.\-/]\s*\d{1,2}\s*[.\-/]\s*\d{1,2}\.?"
+    r"(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*$"
+)
 
 
 @dataclass
@@ -36,6 +44,30 @@ def first_text(node: Tag | None) -> str:
     if node is None:
         return ""
     return " ".join(node.get_text(" ", strip=True).split())
+
+
+def find_row_date(row: Tag, selectors: Iterable[str] = ()) -> Optional[str]:
+    """목록 행(row)에서 게시일 문자열을 뽑는다.
+
+    사이트 목록의 날짜 셀은 클래스가 불안정(Tailwind 등)하거나 아예 클래스가 없어
+    고정 셀렉터만으로는 잡히지 않는 경우가 많다. 그래서:
+      1) 힌트 셀렉터(``.date`` 등)가 주어지면 먼저 시도하고,
+      2) 실패하면 행 안에서 **텍스트 전체가 순수 날짜인** 요소를 찾아 그 값을 쓴다.
+
+    2)는 제목에 섞인 날짜(예: "2026년 하반기", "(~7/15)")를 오탐하지 않는다 —
+    연도 포함 ``YYYY[./-]M[./-]D`` 형태의 셀만 매칭하기 때문.
+    """
+    for selector in selectors:
+        node = row.select_one(selector)
+        text = first_text(node)
+        if text:
+            return text
+
+    for element in row.find_all(["td", "span", "time", "p", "dd", "div"]):
+        text = element.get_text(" ", strip=True)
+        if _PURE_DATE_RE.match(text):
+            return " ".join(text.split())
+    return None
 
 
 def compact_text(text: str | None) -> str:

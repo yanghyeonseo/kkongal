@@ -101,10 +101,25 @@ class AlertChannelTestResponseSerializer(serializers.Serializer):
     error = serializers.CharField(allow_blank=True)
 
 
-class AlertChannelCreateResponseSerializer(AlertChannelSerializer):
-    """채널 생성 응답: 채널 정보 + 연동 확인 발송 결과(confirmation)."""
+class AlertChannelConfirmationSerializer(serializers.Serializer):
+    """채널 생성 직후 연동 확인 발송의 best-effort 상태.
 
-    confirmation = AlertChannelTestResponseSerializer()
+    확인 메시지는 백그라운드에서 논블로킹으로 발송되므로, 생성 응답 시점에는 실제
+    도착 여부를 알 수 없다. ``pending=True`` 는 '발송을 시도 중'이라는 뜻이고,
+    ``ok`` 는 요청을 (낙관적으로) 접수했는지 여부다. 실제 발송 실패는 서버 로그로만
+    남으며 채널 생성 자체는 항상 성공한다(무한로딩 방지 위해 SMTP 왕복을 기다리지
+    않는다).
+    """
+
+    ok = serializers.BooleanField()
+    error = serializers.CharField(allow_blank=True)
+    pending = serializers.BooleanField()
+
+
+class AlertChannelCreateResponseSerializer(AlertChannelSerializer):
+    """채널 생성 응답: 채널 정보 + 연동 확인 발송 상태(confirmation)."""
+
+    confirmation = AlertChannelConfirmationSerializer()
 
     class Meta(AlertChannelSerializer.Meta):
         fields = AlertChannelSerializer.Meta.fields + ("confirmation",)

@@ -24,13 +24,18 @@ from typing import Any, Optional
 import httpx
 from django.conf import settings
 
-from .prompts import build_messages
+from .prompts import build_enrichment_messages, build_messages
 
 logger = logging.getLogger("ai")
 
 # provider 값
 PROVIDER_LLM = "llm"
 PROVIDER_FALLBACK = "fallback"
+
+# 보강(enrichment)은 공지당 1회뿐이라 분류(사용자당 1회)보다 본문을 넉넉히 보낸다.
+# content_markdown 이 원문을 최대한 보존하도록 상한을 크게 잡되, 병적으로 큰 페이지는
+# 이 지점에서 잘라 비용/지연을 방어한다.
+ENRICH_MAX_CONTENT_CHARS = 8000
 
 # 일시적 과부하(429 Too Many Requests / 503 Service Unavailable, Gemini 무료 티어 등)
 # 는 짧게 재시도하면 대개 성공한다. 그래도 실패하면 키워드 폴백으로 넘어간다.
@@ -56,6 +61,20 @@ class Verdict:
             "matched_keywords": list(self.matched_keywords),
             "reason": self.reason,
         }
+
+
+@dataclass
+class Enrichment:
+    """공지 보강 결과(사용자 무관).
+
+    ``deadline`` 은 LLM 이 준 '원문 그대로의' 마감일 문자열(또는 None)이다. aware
+    datetime 으로의 파싱·저장은 호출자(ai/enrich.py)가 담당한다.
+    """
+
+    summary: str = ""
+    content_markdown: str = ""
+    deadline: Optional[str] = None
+    provider: str = PROVIDER_LLM
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
@@ -85,6 +104,27 @@ def extract_json(text: str) -> dict[str, Any]:
         if start != -1 and end != -1 and end > start:
             return json.loads(cleaned[start : end + 1])
         raise ValueError("응답에서 JSON 객체를 찾지 못함")
+
+
+# 문장 종결 부호(마침표/물음표/느낌표, 한중일 문장부호 포함) 뒤의 공백에서 자른다.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？])\s+")
+
+
+def first_sentences(text: str, count: int = 3, *, max_chars: int = 400) -> str:
+    """본문 앞부분에서 문장 ``count`` 개를 뽑아 오프라인 요약 폴백으로 쓴다.
+
+    문장 부호가 없으면(목록·표 형태 공지 등) 정규화한 앞부분을 ``max_chars`` 로 잘라
+    돌려준다. 결코 예외를 던지지 않는다.
+    """
+
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return ""
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(normalized) if p.strip()]
+    summary = " ".join(parts[:count]) if parts else normalized
+    if len(summary) > max_chars:
+        summary = summary[:max_chars].rstrip() + "…"
+    return summary
 
 
 class LLMClient:
@@ -131,9 +171,12 @@ class LLMClient:
         publisher: str = "",
         profile: Optional[dict[str, Any]] = None,
         interests: Optional[list[dict[str, Any]]] = None,
+        summary: str = "",
     ) -> Verdict:
         """공지 + 사용자(프로필/관심조건) 을 받아 관련도 Verdict 를 돌려준다.
 
+        ``summary`` 는 보강 단계에서 만든 3문장 요약(있으면). 모델 입력에 함께 실어
+        더 싸고 정확하게 판단하도록 돕는다(NFR-6).
         어떤 경우에도 예외를 밖으로 던지지 않는다(실패 시 키워드 폴백).
         """
 
@@ -153,6 +196,7 @@ class LLMClient:
                 publisher=publisher,
                 profile=profile,
                 interests=interests,
+                summary=summary,
             )
             return self._parse_verdict(data)
         except Exception as exc:  # 결코 밖으로 던지지 않는다
@@ -175,6 +219,7 @@ class LLMClient:
         publisher: str,
         profile: dict[str, Any],
         interests: list[dict[str, Any]],
+        summary: str = "",
     ) -> dict[str, Any]:
         messages = build_messages(
             title=title,
@@ -182,7 +227,18 @@ class LLMClient:
             publisher=publisher,
             profile=profile,
             interests=interests,
+            summary=summary,
         )
+        return self._chat_json(messages)
+
+    def _chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        """messages 를 보내 JSON 객체 응답을 받아 방어적으로 파싱한다.
+
+        분류(classify)와 보강(enrich)이 공유하는 저수준 호출. 일시 과부하
+        (429/503)는 짧게 재시도한다. 실패 시 예외를 던지며, 폴백 전환은 각 상위
+        메서드(classify/enrich)가 책임진다.
+        """
+
         payload = {
             "model": self.model,
             "messages": messages,
@@ -218,6 +274,72 @@ class LLMClient:
 
         content_text = body["choices"][0]["message"]["content"]
         return extract_json(content_text)
+
+    # -- 보강(enrichment) — 사용자 무관, 공지당 1회 -------------------------
+
+    def enrich(self, *, title: str, content: str) -> Enrichment:
+        """공지 title+content 로 summary/content_markdown/deadline 을 얻는다.
+
+        어떤 경우에도 예외를 밖으로 던지지 않는다(키 없음/실패 시 오프라인 폴백:
+        요약=본문 앞부분, markdown=원문, deadline=None).
+        """
+
+        original = content or ""
+        if not self.enabled:
+            return self._enrich_fallback(original, note="LLM_API_KEY 미설정")
+
+        truncated = original[:ENRICH_MAX_CONTENT_CHARS]
+        try:
+            data = self._chat_json(
+                build_enrichment_messages(title=title, content=truncated)
+            )
+            return self._parse_enrichment(data, original)
+        except Exception as exc:  # 결코 밖으로 던지지 않는다
+            logger.warning(
+                "LLM 보강 호출/파싱 실패 → 오프라인 폴백 전환 (model=%s): %s",
+                self.model,
+                exc,
+            )
+            return self._enrich_fallback(original, note="LLM 보강 실패")
+
+    def _parse_enrichment(
+        self, data: dict[str, Any], original_content: str
+    ) -> Enrichment:
+        summary = str(data.get("summary") or "").strip()
+        markdown = str(data.get("content_markdown") or "").strip()
+
+        deadline = data.get("deadline_at")
+        if deadline is not None:
+            deadline = str(deadline).strip() or None
+
+        # 모델이 비워 보낸 필드는 원문 기반으로 보완해 정보 손실을 막는다.
+        if not summary:
+            summary = first_sentences(original_content, 3)
+        if not markdown:
+            markdown = (original_content or "").strip()
+
+        return Enrichment(
+            summary=summary,
+            content_markdown=markdown,
+            deadline=deadline,
+            provider=PROVIDER_LLM,
+        )
+
+    def _enrich_fallback(self, content: str, *, note: str = "") -> Enrichment:
+        """키 없음/호출 실패 시의 결정론적 보강(원문 보존).
+
+        요약은 본문 앞 3문장, markdown 은 원문 그대로, 마감일은 알 수 없어 None.
+        """
+
+        if note:
+            logger.debug("enrich fallback note: %s", note)
+        text = (content or "").strip()
+        return Enrichment(
+            summary=first_sentences(text, 3),
+            content_markdown=text,
+            deadline=None,
+            provider=PROVIDER_FALLBACK,
+        )
 
     def _parse_verdict(self, data: dict[str, Any]) -> Verdict:
         score = data.get("score", 0.0)

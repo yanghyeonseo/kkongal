@@ -146,6 +146,8 @@ def _classify_pair(
                 "gender": user.gender,
             },
             interests=interests,
+            # 보강 단계에서 만든 3문장 요약이 있으면 함께 실어 판단 품질↑·비용↓.
+            summary=notice.summary,
         )
 
         if verdict.provider == PROVIDER_LLM:
