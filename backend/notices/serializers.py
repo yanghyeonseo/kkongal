@@ -57,6 +57,11 @@ class InboxNoticeSaveSerializer(serializers.Serializer):
     is_saved = serializers.BooleanField()
 
 
+class InboxNoticeReadSerializer(serializers.Serializer):
+    # 기본값 True: 공지를 열면(별도 값 없이 호출) 읽음 처리한다.
+    is_read = serializers.BooleanField(required=False, default=True)
+
+
 class AiCandidateInterestSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     keyword = serializers.CharField()

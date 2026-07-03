@@ -12,7 +12,11 @@ import AuthModal from "./components/AuthModal.jsx";
 import Landing from "./components/Landing.jsx";
 import OnboardingWizard from "./components/OnboardingWizard.jsx";
 
-import { getMyInboxNotices, toggleInboxNoticeSave } from "./api/inboxApi.js";
+import {
+  getMyInboxNotices,
+  toggleInboxNoticeSave,
+  markInboxNoticeRead,
+} from "./api/inboxApi.js";
 import { getNoticeSources, syncSource, updateSourceName } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import {
@@ -256,13 +260,20 @@ function App() {
 
   // 카드 클릭 → 상세 모달을 열고, 여는 즉시 읽음 처리(안 읽음 점 사라짐).
   const handleOpenNotice = (notice) => {
-    setNotices((prev) =>
-      prev.map((item) =>
-        item.inboxNoticeId === notice.inboxNoticeId
-          ? { ...item, isRead: true }
-          : item,
-      ),
-    );
+    if (!notice.isRead) {
+      setNotices((prev) =>
+        prev.map((item) =>
+          item.inboxNoticeId === notice.inboxNoticeId
+            ? { ...item, isRead: true }
+            : item,
+        ),
+      );
+      // 서버에도 읽음 저장 → 새로고침 후에도 안읽음 점이 사라진 상태 유지.
+      // 실패해도 열람은 막지 않는다(로컬은 이미 읽음 처리).
+      markInboxNoticeRead(notice.inboxNoticeId).catch((error) =>
+        console.error(error),
+      );
+    }
     setSelectedNoticeId(notice.inboxNoticeId);
   };
 

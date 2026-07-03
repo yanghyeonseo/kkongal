@@ -14,6 +14,7 @@ from .models import InboxNotice, Notice
 from .serializers import (
     AiInboxNoticeCreateSerializer,
     AiNoticeCandidateSerializer,
+    InboxNoticeReadSerializer,
     InboxNoticeSaveSerializer,
     InboxNoticeSerializer,
     NoticeSerializer,
@@ -117,6 +118,41 @@ class InboxNoticeSaveView(APIView):
         if request_serializer.is_valid(raise_exception=True):
             inbox_notice.is_saved = request_serializer.validated_data["is_saved"]
             inbox_notice.save(update_fields=["is_saved"])
+
+        response_serializer = InboxNoticeSerializer(inbox_notice)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class InboxNoticeReadView(APIView):
+    @extend_schema(
+        summary="공지 읽음 상태 변경",
+        description="로그인한 사용자의 inbox 공지를 읽음(기본) 또는 안읽음으로 표시합니다.",
+        request=InboxNoticeReadSerializer,
+        responses={
+            200: InboxNoticeSerializer,
+            400: "Bad Request",
+            401: "Unauthorized",
+            404: "Not Found",
+        },
+    )
+    def patch(self, request, inbox_notice_id):
+        author = request.user
+
+        if not author.is_authenticated:
+            return Response(
+                {"detail": "please signin"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        inbox_notice = get_object_or_404(
+            InboxNotice.objects.select_related("notice_id", "notice_id__source_id"),
+            id=inbox_notice_id,
+            user_id=author,
+        )
+
+        request_serializer = InboxNoticeReadSerializer(data=request.data)
+        if request_serializer.is_valid(raise_exception=True):
+            inbox_notice.is_read = request_serializer.validated_data["is_read"]
+            inbox_notice.save(update_fields=["is_read"])
 
         response_serializer = InboxNoticeSerializer(inbox_notice)
         return Response(response_serializer.data, status=status.HTTP_200_OK)

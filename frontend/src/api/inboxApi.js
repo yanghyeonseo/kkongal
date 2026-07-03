@@ -105,3 +105,12 @@ export async function toggleInboxNoticeSave(inboxNoticeId, isSaved) {
   });
   return normalizeInboxNotice(data);
 }
+
+// 읽음 상태를 서버에 저장한다(공지를 열면 호출) → 새로고침 후에도 유지.
+export async function markInboxNoticeRead(inboxNoticeId, isRead = true) {
+  const data = await apiRequest(`/api/notices/inbox/${inboxNoticeId}/read/`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_read: isRead }),
+  });
+  return normalizeInboxNotice(data);
+}
