@@ -41,7 +41,6 @@ _SYNC_CLASSIFY_CAP = 10
 # 온디맨드 스크랩 창: 최근 N일 이내 공지를 최대 M건까지 가져온다.
 _SYNC_RECENT_DAYS = 7
 _SYNC_FETCH_CAP = 20
-_UNSUPPORTED_MESSAGE = "이 사이트는 자동 수집을 지원하지 않아요."
 
 # 캐시 상태 TTL(초). 워커가 어떤 이유로 종료해 terminal 상태를 못 남겨도, stale
 # 'running' 은 이 시간 뒤 만료되어 idle(=엔트리 없음) 로 취급된다.
@@ -89,16 +88,8 @@ def run_sync_for_source(user, source, config) -> dict:
     최근 30초 내 크롤 이력이 있으면 재크롤 없이 기존 공지만 재선별한다. 라이브
     사이트 장애 시에도 예외를 던지지 않고 crawled=False + 안내 메시지로 요약한다.
     """
+    # site 가 있으면 카탈로그 손파서(builtin), 없으면 generic 파이프라인(임의 사이트).
     site = next((s for s in config.sites if s.url == source.url), None)
-    if site is None:
-        # 뷰가 이미 걸러내지만(400), 워커가 직접 불릴 때를 위한 방어.
-        return {
-            "crawled": False,
-            "fetched": 0,
-            "new_notices": 0,
-            "inbox_added": 0,
-            "message": _UNSUPPORTED_MESSAGE,
-        }
 
     crawled = False
     crawl_failed = False
@@ -115,7 +106,7 @@ def run_sync_for_source(user, source, config) -> dict:
             Notice.objects.filter(source_id=source).values_list("id", flat=True)
         )
         try:
-            report = _crawl_recent(config, site)
+            report = _crawl_recent(config, site, source)
         except Exception:  # 방어: 어떤 경우에도 예외 대신 graceful 요약.
             log.exception("sync 크롤 실패 (source=%s)", source.id)
             crawl_failed = True
@@ -173,14 +164,24 @@ def _dispatch_alerts(user) -> None:
         log.exception("동기화 후 알림 발송 실패 (user=%s)", getattr(user, "id", None))
 
 
-def _crawl_recent(config, site):
+def _crawl_recent(config, site, source):
     """최근 7일 이내 공지를 최대 20건 스크랩한다.
 
-    순진한 매처는 OFF(match_inbox=False) — inbox 편입은 뒤이은 AI 선별만 담당한다.
+    site 가 있으면 카탈로그 손파서(builtin), 없으면 등록된 NoticeSource 를 generic
+    파이프라인으로 크롤한다(임의 사이트). 어느 쪽이든 순진한 매처는 OFF(match_inbox=False)
+    — inbox 편입은 뒤이은 AI 선별만 담당한다.
     """
-    repository = DjangoNoticeRepository(config=config, match_inbox=False)
+    if site is not None:
+        repository = DjangoNoticeRepository(config=config, match_inbox=False)
+        service = NoticeCrawlService(config=config, repository=repository)
+        return service.crawl_recent(site.id, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP)
+
+    # generic: 모든 공지가 이 source 에 귀속되도록 source_override 로 리포지토리를 만든다.
+    repository = DjangoNoticeRepository(
+        config=config, match_inbox=False, source_override=source
+    )
     service = NoticeCrawlService(config=config, repository=repository)
-    return service.crawl_recent(site.id, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP)
+    return service.crawl_source(source, days=_SYNC_RECENT_DAYS, limit=_SYNC_FETCH_CAP)
 
 
 def _enrich_new_notices(notices):

@@ -228,12 +228,12 @@ class SourceSyncView(APIView):
             "구독한 사이트의 동기화를 백그라운드 작업으로 시작하고 즉시 반환합니다. "
             "실제 크롤·공지당 1회 보강·AI 선별·알림 발송은 단일 순차 워커가 사이트를 "
             "하나씩 처리하며, 진행/완료는 GET /api/sources/sync/status/ 로 폴링합니다. "
-            "자동 수집 미지원 사이트는 작업을 시작하지 않고 400 을 반환합니다."
+            "카탈로그 사이트는 전용 손파서로, 그 외 임의 사이트는 generic 파이프라인"
+            "(rss→json_api→heuristic→llm)으로 자동 수집합니다."
         ),
         request=None,
         responses={
             200: '{"status": "started", "source_id": int}',
-            400: "자동 수집 미지원",
             401: "Unauthorized",
             403: "구독자가 아님",
             404: "Not Found",
@@ -256,15 +256,8 @@ class SourceSyncView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # source.url → config 사이트 매핑. 없으면 자동 수집 미지원(작업 시작하지 않음).
-        config = load_config()
-        site = next((s for s in config.sites if s.url == source.url), None)
-        if site is None:
-            return Response(
-                {"detail": sync_jobs._UNSUPPORTED_MESSAGE},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
+        # 카탈로그 사이트(builtin 손파서)든 임의 사이트(generic 파이프라인)든 모두 동기화
+        # 대상이다. 워커가 source.url 의 카탈로그 매핑 유무에 따라 알아서 경로를 고른다.
         # 실제 작업(크롤→보강→선별→발송)은 순차 워커에 맡기고 즉시 반환한다. LLM 스로틀
         # 때문에 인라인으로 하면 응답이 멈출 수 있어, 워커가 사이트를 하나씩 처리한다.
         sync_jobs.enqueue(user, source)

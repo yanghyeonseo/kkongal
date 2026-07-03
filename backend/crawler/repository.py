@@ -51,9 +51,13 @@ class DjangoNoticeRepository:
         config: Optional[CrawlerConfig] = None,
         *,
         match_inbox: bool = True,
+        source_override: Optional[NoticeSource] = None,
     ) -> None:
         self.config = config or load_config()
         self.match_inbox = match_inbox
+        # generic(임의 사이트) 크롤은 항상 단일 소스라, config 카탈로그에 없는 source_id
+        # 토큰 대신 이 NoticeSource 를 직접 붙인다. 설정되면 모든 공지가 이 소스에 귀속된다.
+        self.source_override = source_override
 
     def insert_many(self, notices: list[RawNotice]) -> tuple[int, int]:
         inserted = 0
@@ -88,6 +92,9 @@ class DjangoNoticeRepository:
         return inserted, duplicates
 
     def _get_or_create_source(self, source_id: str) -> NoticeSource:
+        # generic 크롤: config 조회 없이 등록 시 만들어진 NoticeSource 를 그대로 쓴다.
+        if self.source_override is not None:
+            return self.source_override
         site = self.config.site(source_id)
         source, _ = NoticeSource.objects.get_or_create(
             url=site.url,
