@@ -1,15 +1,24 @@
 // 같은 오리진(Vite dev 프록시)으로 요청하므로 base URL 은 비워둔다. → `/api/...`
 const API_BASE_URL = "";
 
-// 인증 자체를 수행하는 공개 엔드포인트. 이 경로들에는 (만료됐을 수 있는) access_token 을
-// 실어 보내지 않고, 401 이어도 refresh 재시도를 하지 않는다. 그래야 브라우저에 남은
-// stale 토큰 때문에 로그인/회원가입이 막히거나 무의미한 refresh 루프가 돌지 않는다.
+// 인증 자체를 수행하는 공개 엔드포인트. 이 경로들은 401 이어도 refresh 재시도를 하지 않는다
+// (그래야 로그인/회원가입/재발급 실패가 무의미한 refresh 루프로 번지지 않는다). 쿠키는
+// credentials:"include" 로 그대로 전송되지만, 백엔드가 이 공개 엔드포인트에선 stale 토큰을
+// 조용히 무시한다(CookieJWTAuthentication 이 예외 대신 None 반환).
 const AUTH_PATHS = [
   "/api/account/signin/",
   "/api/account/signup/",
   "/api/account/refresh/",
   "/api/account/logout/",
 ];
+
+// 인증 상실(access_token 만료 + refresh 재발급 실패) 시 호출할 콜백. App 이 등록해
+// currentUser 를 비우고 로그인 화면으로 되돌린다. 최초 미인증 하이드레이트에서도 불릴 수
+// 있으므로, "로그인 상태였을 때만" 반응하는 판단은 App 핸들러 쪽에서 한다.
+let onUnauthorized = null;
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn;
+}
 
 /**
  * API 에러. status 코드와 백엔드가 내려준 사람이 읽을 수 있는 메시지를 담는다.
@@ -43,25 +52,14 @@ function extractMessage(payload) {
   return "";
 }
 
-// 비-httponly 쿠키(access_token 등)를 읽는다. 백엔드가 httponly 없이 내려주므로 JS 접근 가능.
-function readCookie(name) {
-  const match = document.cookie.match(
-    new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\/+^])/g, "\\$1") + "=([^;]*)"),
-  );
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-async function rawFetch(path, options, accessToken) {
+// 인증 쿠키(access_token/refresh_token)는 HttpOnly 라 JS 에서 읽을 수 없다. 같은 오리진 +
+// credentials:"include" 로 브라우저가 자동으로 실어 보내고, 백엔드가 access_token 쿠키를
+// 직접 읽어 인증한다(account.authentication.CookieJWTAuthentication). → JS 토큰 취급 불필요.
+async function rawFetch(path, options) {
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-
-  // 백엔드의 request.user 인증(JWTAuthentication)은 Authorization 헤더를 읽는다.
-  // 로그인 시 쿠키에 저장된 access_token 을 Bearer 로 실어 보낸다.
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
 
   return fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -70,12 +68,11 @@ async function rawFetch(path, options, accessToken) {
   });
 }
 
-// access_token 이 만료(401)됐을 때 refresh_token 으로 재발급을 1회 시도한다.
-// 초기 로드 시 병렬 요청이 동시에 401 나더라도 refresh 는 한 번만 돌도록 dedupe.
+// access_token 이 만료(401)됐을 때 refresh_token 쿠키로 재발급을 1회 시도한다. refresh_token 은
+// HttpOnly 라 JS 로 존재 여부를 알 수 없으므로, 백엔드에 그대로 위임한다(쿠키가 없거나 만료면
+// 400/401 → 아래에서 false). 초기 로드 시 병렬 요청이 동시에 401 나도 refresh 는 한 번만 돌도록 dedupe.
 let refreshInFlight = null;
 async function refreshAccessToken() {
-  if (!readCookie("refresh_token")) return false;
-
   if (!refreshInFlight) {
     refreshInFlight = fetch(`${API_BASE_URL}/api/account/refresh/`, {
       method: "POST",
@@ -98,21 +95,21 @@ async function refreshAccessToken() {
 
 /**
  * 공통 API 요청 헬퍼.
- * - 같은 오리진 + credentials:include 로 쿠키를 주고받고
- * - 비-httponly access_token 쿠키를 Bearer 헤더로 첨부하며
+ * - 같은 오리진 + credentials:include 로 HttpOnly 인증 쿠키를 자동 송수신하고
  * - 401 이면 refresh 후 1회 재시도한다.
  */
 export async function apiRequest(path, options = {}, _retried = false) {
   const isAuthPath = AUTH_PATHS.some((p) => path.startsWith(p));
-  // 인증 엔드포인트에는 stale 토큰을 붙이지 않는다(쿠키 credentials 는 그대로 전송).
-  const accessToken = isAuthPath ? null : readCookie("access_token");
-  const response = await rawFetch(path, options, accessToken);
+  const response = await rawFetch(path, options);
 
   if (response.status === 401 && !_retried && !isAuthPath) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       return apiRequest(path, options, true);
     }
+    // refresh 실패 = 세션 만료. 등록된 핸들러에 알려 로그인 화면으로 되돌리게 한다.
+    // (하이드레이트 등 미로그인 상태에서의 401 은 App 핸들러가 조용히 무시한다.)
+    if (onUnauthorized) onUnauthorized();
   }
 
   if (!response.ok) {

@@ -1,6 +1,8 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
@@ -18,12 +20,37 @@ from .serializers import InterestSerializer, UserSerializer
 
 User = get_user_model()
 
+_ACCESS_MAX_AGE = int(settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"].total_seconds())
+_REFRESH_MAX_AGE = int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds())
+
+
+def _cookie_flags():
+    """인증 쿠키 공통 플래그(HttpOnly/Secure/SameSite). settings 에서 관리한다."""
+    return {
+        "httponly": settings.AUTH_COOKIE_HTTPONLY,
+        "secure": settings.AUTH_COOKIE_SECURE,
+        "samesite": settings.AUTH_COOKIE_SAMESITE,
+    }
+
+
+def _set_access_cookie(response, access_token):
+    response.set_cookie(
+        "access_token", value=str(access_token), max_age=_ACCESS_MAX_AGE, **_cookie_flags()
+    )
+
+
+def _set_auth_cookies(response, refresh_token):
+    """access_token + refresh_token 쿠키를 함께 심는다."""
+    _set_access_cookie(response, refresh_token.access_token)
+    response.set_cookie(
+        "refresh_token", value=str(refresh_token), max_age=_REFRESH_MAX_AGE, **_cookie_flags()
+    )
+
 
 def set_token_on_response_cookie(user, status_code):
     token = RefreshToken.for_user(user)
     response = Response(UserSerializer(user).data, status=status_code)
-    response.set_cookie("refresh_token", value=str(token))
-    response.set_cookie("access_token", value=str(token.access_token))
+    _set_auth_cookies(response, token)
     return response
 
 
@@ -38,6 +65,11 @@ def login_required_response(request):
 
 
 class SignUpView(APIView):
+    # 공개 엔드포인트(프로젝트 기본 권한은 IsAuthenticated). 무차별 가입 남용을 막기 위해
+    # 'auth' scope 로 빈도 제한한다.
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
     @extend_schema(
         summary="회원가입",
         description="회원가입을 진행합니다.",
@@ -54,11 +86,14 @@ class SignUpView(APIView):
 
 
 class SignInView(APIView):
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
     @extend_schema(
         summary="로그인",
         description="로그인을 진행합니다.",
         request=SignInRequestSerializer,
-        responses={200: UserSerializer, 404: "Not Found", 400: "Bad Request"},
+        responses={200: UserSerializer, 400: "Bad Request", 401: "Unauthorized"},
     )
     def post(self, request):
         username = request.data.get("username")
@@ -68,22 +103,26 @@ class SignInView(APIView):
                 {"message": "missing fields ['username', 'password'] in body"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return Response(
-                {"message": "User does not exist"}, status=status.HTTP_404_NOT_FOUND
-            )
+        # 사용자 존재 여부를 노출하지 않도록: 사용자가 없으면 더미 해시로 check_password 를
+        # 수행해 타이밍 차이를 없애고, 실패 사유를 구분하지 않는 단일 메시지를 돌려준다.
+        user = User.objects.filter(username=username).first()
+        if user is None:
+            User().set_password(password)  # 타이밍 공격 완화용 더미 해시
+            password_ok = False
+        else:
+            password_ok = user.check_password(password)
 
-        if not user.check_password(password):
+        if not password_ok:
             return Response(
-                {"message": "Password is incorrect"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"message": "아이디 또는 비밀번호가 올바르지 않습니다."},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
         return set_token_on_response_cookie(user, status_code=status.HTTP_200_OK)
 
 
 class TokenRefreshView(APIView):
+    permission_classes = [AllowAny]
+
     @extend_schema(
         summary="토큰 재발급",
         description="access 토큰을 재발급 받습니다.",
@@ -97,20 +136,36 @@ class TokenRefreshView(APIView):
                 {"detail": "no refresh token"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        # 회전(rotation): 제출된 refresh 토큰을 검증한 뒤 블랙리스트에 올리고, 새 refresh +
+        # access 토큰을 발급해 쿠키를 교체한다. 탈취된 토큰의 재사용 창을 좁힌다
+        # (SIMPLE_JWT ROTATE_REFRESH_TOKENS/BLACKLIST_AFTER_ROTATION 정책과 일치).
         try:
-            new_token = RefreshToken(refresh_token)
-            new_token.verify()
-        except Exception:
+            old_token = RefreshToken(refresh_token)  # 생성 시 서명·만료·블랙리스트 검증
+        except TokenError:
             return Response(
                 {"detail": "please signin again."}, status=status.HTTP_401_UNAUTHORIZED
             )
 
+        user = User.objects.filter(id=old_token.get("user_id")).first()
+        if user is None:
+            return Response(
+                {"detail": "please signin again."}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        try:
+            old_token.blacklist()  # token_blacklist 앱 사용 시 재사용 차단
+        except AttributeError:
+            pass  # 블랙리스트 앱 미설치 환경 방어
+
+        new_refresh = RefreshToken.for_user(user)
         response = Response({"detail": "token refreshed"}, status=status.HTTP_200_OK)
-        response.set_cookie("access_token", value=str(new_token.access_token))
+        _set_auth_cookies(response, new_refresh)
         return response
 
 
 class LogoutView(APIView):
+    permission_classes = [AllowAny]
+
     @extend_schema(
         summary="로그아웃",
         description="사용자를 로그아웃 시킵니다.",
@@ -140,6 +195,9 @@ class LogoutView(APIView):
 
 
 class MeView(APIView):
+    # 하이드레이트용: 미로그인(쿠키 없음/만료)이면 401 을 직접 반환하므로 공개로 둔다.
+    permission_classes = [AllowAny]
+
     @extend_schema(
         summary="현재 로그인 유저 조회",
         description="쿠키의 access_token 기준으로 현재 로그인한 사용자를 조회합니다.",
