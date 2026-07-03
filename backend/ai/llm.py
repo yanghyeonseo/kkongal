@@ -360,6 +360,40 @@ class LLMClient:
         mark_degraded("quota")
         return self._enrich_fallback(original, note="모든 LLM 계층 실패")
 
+    # -- 범용 JSON 완성 — 도메인 파싱 없이 캐스케이드만 재사용 -----------------
+
+    def complete_json(
+        self, messages: list[dict[str, str]], *, model: Optional[str] = None
+    ) -> dict[str, Any]:
+        """임의의 messages 를 보내 JSON 객체 응답을 그대로 돌려주는 범용 메서드.
+
+        classify/enrich 처럼 1차→2차 모델 캐스케이드(``_chat_json``)를 재사용하되,
+        도메인별 파싱(Verdict/Enrichment)은 하지 않는다. ``model`` 을 지정하면 그
+        모델만 시도하고, 미지정이면 enrich 와 같은 순서(primary→fallback)로 시도한다.
+        어떤 경우에도 예외를 밖으로 던지지 않는다(키 없음/전체 실패 시 빈 dict).
+        """
+
+        if not self.enabled:
+            return {}
+
+        models = [model] if model else self.models
+        for candidate in models:
+            try:
+                data = self._chat_json(messages, model=candidate)
+                mark_ok()
+                return data
+            except Exception as exc:
+                logger.info(
+                    "LLM complete_json 실패(model=%s) → 다음 계층 시도: %s",
+                    candidate, exc,
+                )
+
+        logger.warning(
+            "모든 LLM 계층 실패(complete_json) → 빈 dict 반환 (models=%s)", models
+        )
+        mark_degraded("quota")
+        return {}
+
     def _parse_enrichment(
         self, data: dict[str, Any], original_content: str
     ) -> Enrichment:

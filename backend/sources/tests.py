@@ -87,7 +87,7 @@ class CatalogViewTests(TestCase):
         item = response.data[0]
         self.assertEqual(
             set(item.keys()),
-            {"name", "url", "category", "favicon_url", "subscribed", "source_id"},
+            {"name", "url", "category", "favicon_url", "subscribed", "source_id", "custom"},
         )
         # 카탈로그 항목은 URL 로부터 계산한 파비콘을 담는다(네트워크 없음).
         by_url = {entry["url"]: entry for entry in response.data}
@@ -519,14 +519,15 @@ class SyncViewTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.mock_enqueue.assert_not_called()
 
-    def test_unsupported_url_returns_400_without_enqueue(self) -> None:
+    def test_arbitrary_url_enqueues_generic_sync(self) -> None:
+        # 카탈로그에 없는 임의 URL 도 이제 generic 파이프라인으로 동기화된다(400 아님).
         other = NoticeSource.objects.create(name="임의", url=UNSUPPORTED_URL)
         SourceSubscription.objects.create(user_id=self.user, source_id=other)
         response = self._sync(other.id, user=self.user)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "이 사이트는 자동 수집을 지원하지 않아요.")
-        self.mock_enqueue.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"status": "started", "source_id": other.id})
+        self.mock_enqueue.assert_called_once_with(self.user, other)
 
     def test_sync_enqueues_and_returns_started(self) -> None:
         response = self._sync(self.source.id, user=self.user)

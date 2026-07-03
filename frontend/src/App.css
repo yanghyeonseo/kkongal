@@ -4497,3 +4497,113 @@ a.primaryButton {
   opacity: 1;
   background: rgba(15, 23, 42, 0.06);
 }
+
+/* =====================================================================
+   Custom sites — catalog "커스텀" badge + "내가 추가한 사이트" management
+   (site register modal; appended last, does not alter earlier rules)
+   ===================================================================== */
+
+/* ---- Catalog item: name row + community/custom badge ----
+   .catalogInfo strong already handles ellipsis; nesting it in a flex row
+   here just needs min-width:0 so the badge never gets pushed off. */
+.catalogNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.catalogNameRow strong {
+  min-width: 0;
+}
+.catalogCustomBadge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(247, 144, 9, 0.12);
+  color: var(--c-warning);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* ---- "내가 추가한 사이트" management section ----
+   Same card language as .currentTagSection (interest modal). */
+.mySitesSection {
+  padding: 20px;
+  border: 1px solid #e8eef6;
+  border-radius: 20px;
+  background: #fbfdff;
+}
+.mySitesLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--c-text-faint);
+  font-size: 13px;
+  font-weight: 700;
+}
+.mySiteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mySiteItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e8eef6;
+  border-radius: 14px;
+  background: #fff;
+  transition: border-color var(--dur) var(--ease-out);
+}
+.mySiteItem.editing {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 242, 0.1);
+}
+.mySiteInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mySiteInfo strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+.mySiteHost {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mySiteInfo .siteRenameInput {
+  width: 100%;
+}
+.mySiteActions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .mySiteHost {
+    display: none;
+  }
+}

@@ -74,6 +74,57 @@ class NoticeCrawlService:
     def preview_site(self, source_id: str, limit: int = 10) -> list[RawNotice]:
         return self._scrape_site(self.config.site(source_id))[:limit]
 
+    def crawl_source(self, source, days: int = 7, limit: int = 20):
+        """카탈로그에 손파서가 없는 임의 ``NoticeSource`` 를 generic 파이프라인으로 크롤한다.
+
+        rss→json_api→heuristic→llm_profile 계단식으로 목록을 뽑고 상세 보강까지 한 뒤,
+        학습된 전략/프로파일/render 를 ``source`` 에 되써(다음 크롤 재사용) 저장한다.
+        저장은 ``self.repository`` 가 ``source_override=source`` 로 만들어졌다는 전제.
+        crawl_recent 와 동일하게 최근분만 추려 저장한다.
+        """
+        from .generic import orchestrator
+        from .generic.base import SourceSpec
+        from .generic.fetcher import Escalator
+
+        spec = SourceSpec(
+            id=f"src-{source.id}",
+            url=source.url,
+            name=source.name or "",
+            render=source.render or "http",
+            scraper_kind=source.scraper_kind or "",
+            extraction_profile=source.extraction_profile or None,
+        )
+
+        def produce() -> list[RawNotice]:
+            escalator = Escalator(self.config.defaults)
+            outcome = orchestrator.scrape(spec, escalator.fetch, limit=self.config.defaults.max_items_per_run)
+            if outcome.applied:
+                self._learn(source, outcome)
+            return self._select_recent(outcome.items, days=days, limit=limit)
+
+        # _run 은 site.id 만 리포트에 쓰므로 spec 을 site 자리처럼 넘긴다(id/…만 사용).
+        return self._run(spec, produce)
+
+    @staticmethod
+    def _learn(source, outcome) -> None:
+        """generic 크롤이 성공한 전략/프로파일/render 를 NoticeSource 에 저장한다."""
+        from django.utils import timezone
+
+        source.scraper_kind = outcome.kind or source.scraper_kind
+        if outcome.profile:
+            source.extraction_profile = outcome.profile
+        if outcome.render:
+            source.render = outcome.render
+        source.last_extract_ok_at = timezone.now()
+        source.save(
+            update_fields=[
+                "scraper_kind",
+                "extraction_profile",
+                "render",
+                "last_extract_ok_at",
+            ]
+        )
+
     def _run(self, site: SiteConfig, produce: Callable[[], list[RawNotice]]) -> CrawlReport:
         """``produce`` 로 얻은 공지를 저장하고 CrawlReport 로 묶는 공통 경로.
 
