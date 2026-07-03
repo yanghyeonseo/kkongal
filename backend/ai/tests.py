@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 from io import StringIO
+from unittest import mock
 
 import httpx
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -23,6 +25,7 @@ from ai.enrich import enrich_notice, enrich_notices, parse_deadline
 from ai.llm import PROVIDER_FALLBACK, PROVIDER_LLM, LLMClient, extract_json
 from ai.prompts import build_messages
 from ai.service import NAIVE_REASON, classify_notice, run_classification
+from ai.status import get_status
 
 User = get_user_model()
 
@@ -47,7 +50,9 @@ def make_fixed_client(content: str, *, status_code: int = 200) -> LLMClient:
             json={"choices": [{"message": {"content": content}}]},
         )
 
-    return LLMClient(api_key="test-key", transport=httpx.MockTransport(handler))
+    return LLMClient(
+        api_key="test-key", min_interval=0, transport=httpx.MockTransport(handler)
+    )
 
 
 def make_smart_client() -> LLMClient:
@@ -74,7 +79,9 @@ def make_smart_client() -> LLMClient:
             }
         )
 
-    return LLMClient(api_key="test-key", transport=httpx.MockTransport(handler))
+    return LLMClient(
+        api_key="test-key", min_interval=0, transport=httpx.MockTransport(handler)
+    )
 
 
 def make_capturing_client(payload: dict):
@@ -91,12 +98,17 @@ def make_capturing_client(payload: dict):
         captured["user"] = body["messages"][-1]["content"]
         return _completion(payload)
 
-    client = LLMClient(api_key="test-key", transport=httpx.MockTransport(handler))
+    client = LLMClient(
+        api_key="test-key", min_interval=0, transport=httpx.MockTransport(handler)
+    )
     return client, captured
 
 
 class BaseFixtures(TestCase):
     def setUp(self) -> None:
+        # AI degraded 배너 플래그(LocMemCache)는 프로세스 전역이라, 캐스케이드가 남기는
+        # 'quota' 가 다른 테스트·앱으로 새지 않도록 각 테스트 종료 시 비운다.
+        self.addCleanup(cache.clear)
         self.source = NoticeSource.objects.create(
             name="테스트 공지처", url="https://example.com/notices"
         )
@@ -502,6 +514,8 @@ class EnrichmentTests(TestCase):
     """공지 보강(enrich_notice/enrich_notices) — LLM 목/오프라인 폴백 모두 검증."""
 
     def setUp(self) -> None:
+        # 보강 캐스케이드가 모든 계층 실패 시 남기는 'quota' 플래그가 새지 않도록 정리.
+        self.addCleanup(cache.clear)
         self.source = NoticeSource.objects.create(
             name="장학팀", url="https://example.com/scholarship"
         )
@@ -836,3 +850,151 @@ class FallbackDescriptionMatchTests(TestCase):
             verdict.matched_keywords,
         )
         self.assertNotIn("동아리", verdict.matched_keywords)
+
+
+def make_cascade_client(
+    *, primary: str, fallback: str, payload: dict, fail_status: int = 429
+):
+    """1차(primary) 모델엔 ``fail_status``, 2차(fallback) 모델엔 ``payload`` 를 주는 클라이언트.
+
+    반환한 ``called`` 리스트에 실제 호출된 모델명이 순서대로 쌓여 캐스케이드를 검증한다.
+    """
+
+    called: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        model = body["model"]
+        called.append(model)
+        if model == primary:
+            return httpx.Response(fail_status, json={"error": "rate limited"})
+        return _completion(payload)
+
+    client = LLMClient(
+        api_key="test-key",
+        model=primary,
+        fallback_model=fallback,
+        min_interval=0,
+        transport=httpx.MockTransport(handler),
+    )
+    return client, called
+
+
+@override_settings(LLM_API_KEY="test-key", LLM_RELEVANCE_THRESHOLD=0.5)
+class CascadeTests(TestCase):
+    """3단 캐스케이드: 1차 실패 → 2차(Gemma급) 모델 → 둘 다 실패 시 결정론적 폴백."""
+
+    def setUp(self) -> None:
+        # 배너 플래그(LocMemCache)를 결정론적으로: 시작·종료 모두 비운다.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_classify_cascades_to_fallback_model_and_stays_ok(self) -> None:
+        client, called = make_cascade_client(
+            primary="primary-model",
+            fallback="fallback-model",
+            payload={
+                "relevant": True,
+                "score": 0.9,
+                "matched_keywords": ["채용"],
+                "reason": "2차 모델이 판단",
+            },
+        )
+        verdict = client.classify(
+            title="2026 백엔드 채용",
+            content="백엔드 개발자를 채용합니다.",
+            interests=[{"keyword": "채용", "description": "백엔드 채용"}],
+        )
+        # 2차 모델이 성공 → LLM 판정으로 취급(결정론적 폴백 아님).
+        self.assertEqual(verdict.provider, PROVIDER_LLM)
+        self.assertAlmostEqual(verdict.score, 0.9)
+        self.assertEqual(verdict.reason, "2차 모델이 판단")
+        # 1차(primary) 실패 후 2차(fallback) 모델이 실제로 호출됐다.
+        self.assertEqual(called, ["primary-model", "fallback-model"])
+        # Gemma급 폴백이 응답 중이므로 degraded 배너가 뜨면 안 된다(mark_ok).
+        self.assertFalse(get_status()["degraded"])
+
+    def test_classify_all_models_fail_uses_deterministic_and_marks_quota(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, json={"error": "rate limited"})
+
+        client = LLMClient(
+            api_key="test-key",
+            model="primary-model",
+            fallback_model="fallback-model",
+            min_interval=0,
+            transport=httpx.MockTransport(handler),
+        )
+        verdict = client.classify(
+            title="백엔드 채용 공고",
+            content="백엔드 개발자 채용",
+            interests=[{"keyword": "채용", "description": "백엔드 채용"}],
+        )
+        # 두 LLM 계층 모두 실패 → 결정론적 키워드 폴백.
+        self.assertEqual(verdict.provider, PROVIDER_FALLBACK)
+        self.assertGreaterEqual(verdict.score, 0.5)  # 키워드 매칭 성공
+        # 결정론적 계층으로 내려갔을 때만 degraded(quota) 배너가 뜬다.
+        status = get_status()
+        self.assertTrue(status["degraded"])
+        self.assertEqual(status["reason"], "quota")
+
+    def test_enrich_cascades_to_fallback_model(self) -> None:
+        payload = {
+            "summary": "요약 1. 요약 2. 요약 3.",
+            "content_markdown": "# 정리된 본문",
+            "deadline_at": "2026-03-15",
+        }
+        client, called = make_cascade_client(
+            primary="primary-model", fallback="fallback-model", payload=payload
+        )
+        result = client.enrich(
+            title="성적우수 장학금 안내",
+            content="성적우수 장학금을 신청받습니다. 마감은 2026-03-15 입니다.",
+        )
+        # 1차 실패 후 2차 모델이 성공 → LLM 보강으로 취급.
+        self.assertEqual(result.provider, PROVIDER_LLM)
+        self.assertEqual(result.summary, payload["summary"])
+        self.assertEqual(result.content_markdown, payload["content_markdown"])
+        self.assertEqual(result.deadline, "2026-03-15")
+        self.assertEqual(called, ["primary-model", "fallback-model"])
+        self.assertFalse(get_status()["degraded"])
+
+
+class ThrottleTests(TestCase):
+    """전역 요청 스로틀: 연속 _chat_json 호출이 min_interval 만큼 벌어지는지(실제 sleep 없음)."""
+
+    def test_back_to_back_chat_json_calls_are_spaced(self) -> None:
+        import ai.llm as llm_module
+
+        # 가짜 monotonic 시계 + sleep: 실제로 자지 않고, 잔 만큼만 시계를 진행시킨다.
+        clock = {"t": 1000.0}
+        sleeps: list[float] = []
+
+        def fake_monotonic() -> float:
+            return clock["t"]
+
+        def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock["t"] += seconds
+
+        # 결정론적 출발점: 직전 요청 시각을 리셋.
+        llm_module._last_request_monotonic = 0.0
+
+        client = make_fixed_client(
+            json.dumps({"score": 0.5, "matched_keywords": [], "reason": "x"})
+        )
+        client.min_interval = 3.0  # 이 테스트에서만 스로틀 활성화
+
+        messages = build_messages(
+            title="제목", content="본문", publisher="", profile={}, interests=[]
+        )
+
+        with mock.patch.object(llm_module.time, "monotonic", fake_monotonic), \
+                mock.patch.object(llm_module.time, "sleep", fake_sleep):
+            client._chat_json(messages, model="m")
+            client._chat_json(messages, model="m")
+
+        # 1번째: last=0, now=1000 → wait<0 → sleep 없음(last←1000).
+        # 2번째: now=1000, last=1000 → wait=3.0 → sleep(3.0) 정확히 한 번.
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 3.0, places=6)

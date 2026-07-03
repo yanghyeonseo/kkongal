@@ -5,6 +5,7 @@ from .views import (
     SourceDetailView,
     SourceSubscriptionDetailView,
     SourceSubscriptionListView,
+    SourceSyncStatusView,
     SourceSyncView,
 )
 
@@ -21,6 +22,8 @@ urlpatterns = [
 # (notices.urls 의 ai_urlpatterns 처럼 리드가 kkongal/urls.py 에서 include 한다.)
 sources_urlpatterns = [
     path("catalog/", SourceCatalogView.as_view(), name="catalog"),
+    # 정적 경로는 <int:source_id> 라우트보다 먼저 둔다.
+    path("sync/status/", SourceSyncStatusView.as_view(), name="sync-status"),
     path("<int:source_id>/sync/", SourceSyncView.as_view(), name="sync"),
     path("<int:source_id>/", SourceDetailView.as_view(), name="detail"),
 ]

@@ -1,14 +1,20 @@
-"""제공자 비종속(OpenAI 호환) LLM 클라이언트 + 오프라인 키워드 폴백.
+"""제공자 비종속(OpenAI 호환) LLM 클라이언트 + 3단 캐스케이드 + 오프라인 폴백.
 
 `POST {LLM_BASE_URL}/chat/completions` 를 httpx 로 호출한다. 기본 대상은 가성비가
 좋은 Google Gemini 의 OpenAI 호환 엔드포인트이지만, LLM_BASE_URL/LLM_MODEL/
 LLM_API_KEY 만 바꾸면 OpenAI·DeepSeek·Groq·Together 등 어떤 OpenAI 호환 제공자로도
 교체된다.
 
+3단 캐스케이드(무료 티어 한도 방어): 1차 = LLM_MODEL(primary) → 2차 =
+LLM_FALLBACK_MODEL(같은 base_url·api_key, 모델 문자열만 다름) → 3차 = 결정론적
+키워드/설명 매칭 폴백. 1·2차 중 하나라도 성공하면 정상(mark_ok)이고, 두 LLM 계층이
+모두 실패할 때만 키워드 폴백 배너가 뜬다(mark_degraded('quota')).
+
 핵심 안전 장치:
-- LLM_API_KEY 가 비어 있거나 API 호출이 실패하면 결코 예외를 밖으로 던지지 않고,
+- LLM_API_KEY 가 비어 있거나 모든 LLM 계층이 실패하면 결코 예외를 밖으로 던지지 않고,
   결정론적 키워드 매칭 폴백으로 전환한다(로그 남김). 덕분에 키 없이도 데모/테스트/CI
   가 그대로 동작한다.
+- 프로세스 전역 스로틀(LLM_MIN_REQUEST_INTERVAL_SECONDS)로 요청 간 최소 간격을 둬 RPM 을 낮춘다.
 - 응답 JSON 은 방어적으로 파싱한다(코드펜스 제거, 앞뒤 잡텍스트 허용).
 - 비용(NFR-6) 통제를 위해 본문을 LLM_MAX_CONTENT_CHARS 로 잘라 보낸다.
 """
@@ -17,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -37,11 +44,17 @@ PROVIDER_FALLBACK = "fallback"
 # 이 지점에서 잘라 비용/지연을 방어한다.
 ENRICH_MAX_CONTENT_CHARS = 8000
 
-# 일시적 과부하(429 Too Many Requests / 503 Service Unavailable, Gemini 무료 티어 등)
-# 는 짧게 재시도하면 대개 성공한다. 그래도 실패하면 키워드 폴백으로 넘어간다.
-_RETRY_STATUSES = frozenset({429, 503})
+# 503(Service Unavailable) 같은 일시 과부하는 짧게 재시도하면 대개 성공한다. 429(레이트
+# 리밋/할당량)는 여기서 길게 재시도하지 않는다 — 캐스케이드가 다음 모델로 넘어가기 때문.
+_RETRY_STATUSES = frozenset({503})
 _MAX_RETRIES = 2
 _RETRY_BACKOFF = 0.6
+
+# ── 전역 요청 스로틀 ─────────────────────────────────────────────────────────
+# 무료 티어 RPM 한도를 지키기 위해 프로세스 내 모든 LLM HTTP 요청 사이에 최소 간격을
+# 둔다. 모듈 전역이라 여러 LLMClient 인스턴스·스레드가 하나의 시계를 공유한다.
+_throttle_lock = threading.Lock()
+_last_request_monotonic = 0.0
 
 
 @dataclass
@@ -132,13 +145,20 @@ class LLMClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        fallback_model: Optional[str] = None,
         timeout: Optional[float] = None,
         max_content_chars: Optional[int] = None,
+        min_interval: Optional[float] = None,
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         self.api_key = settings.LLM_API_KEY if api_key is None else api_key
         self.base_url = (base_url or settings.LLM_BASE_URL).rstrip("/")
         self.model = model or settings.LLM_MODEL
+        self.fallback_model = (
+            settings.LLM_FALLBACK_MODEL
+            if fallback_model is None
+            else fallback_model
+        )
         self.timeout = (
             settings.LLM_TIMEOUT_SECONDS if timeout is None else timeout
         )
@@ -147,6 +167,18 @@ class LLMClient:
             if max_content_chars is None
             else max_content_chars
         )
+        self.min_interval = (
+            settings.LLM_MIN_REQUEST_INTERVAL_SECONDS
+            if min_interval is None
+            else min_interval
+        )
+        # 1차(primary) → 2차(fallback) 순으로 시도할 모델 목록(중복 제거·순서 보존).
+        seen: set[str] = set()
+        self.models: list[str] = []
+        for name in (self.model, self.fallback_model):
+            if name and name not in seen:
+                seen.add(name)
+                self.models.append(name)
         self._transport = transport
 
     @property
@@ -176,35 +208,42 @@ class LLMClient:
         truncated = (content or "")[: self.max_content_chars]
 
         if not self.enabled:
+            mark_degraded("disabled")
             return self._fallback(
                 title, truncated, interests, note="LLM_API_KEY 미설정"
             )
 
-        try:
-            data = self._call_api(
-                title=title,
-                content=truncated,
-                publisher=publisher,
-                profile=profile,
-                interests=interests,
-                summary=summary,
-            )
-            return self._parse_verdict(data)
-        except Exception as exc:
-            logger.warning(
-                "LLM 호출/파싱 실패 → 키워드 폴백 전환 (model=%s): %s",
-                self.model,
-                exc,
-            )
-            return self._fallback(
-                title, truncated, interests, note="LLM 호출 실패"
-            )
+        # 1차 → 2차 모델 순으로 시도. 하나라도 성공하면 정상(mark_ok) 후 반환.
+        for model in self.models:
+            try:
+                data = self._call_api(
+                    model=model,
+                    title=title,
+                    content=truncated,
+                    publisher=publisher,
+                    profile=profile,
+                    interests=interests,
+                    summary=summary,
+                )
+                verdict = self._parse_verdict(data)
+                mark_ok()
+                return verdict
+            except Exception as exc:
+                logger.info(
+                    "LLM 분류 실패(model=%s) → 다음 계층 시도: %s", model, exc
+                )
+
+        # 모든 LLM 계층이 실패 → 배너 플래그(quota) + 결정론적 키워드 폴백.
+        logger.warning("모든 LLM 계층 실패 → 키워드 폴백 전환 (models=%s)", self.models)
+        mark_degraded("quota")
+        return self._fallback(title, truncated, interests, note="모든 LLM 계층 실패")
 
     # -- 내부 구현 ---------------------------------------------------------
 
     def _call_api(
         self,
         *,
+        model: str,
         title: str,
         content: str,
         publisher: str,
@@ -220,18 +259,39 @@ class LLMClient:
             interests=interests,
             summary=summary,
         )
-        return self._chat_json(messages)
+        return self._chat_json(messages, model=model)
 
-    def _chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        """messages 를 보내 JSON 객체 응답을 받아 방어적으로 파싱한다.
+    def _throttle(self) -> None:
+        """직전 요청 이후 ``min_interval`` 초가 지나도록 (필요 시) 대기한다.
 
-        분류(classify)와 보강(enrich)이 공유하는 저수준 호출. 일시 과부하
-        (429/503)는 짧게 재시도한다. 실패 시 예외를 던지며, 폴백 전환은 각 상위
-        메서드(classify/enrich)가 책임진다.
+        프로세스 전역 시계를 스레드 안전하게 공유해 인스턴스·스레드가 몇 개든 전체
+        RPM 을 억제한다. ``min_interval <= 0`` 이면 아무 것도 하지 않는다(테스트/비활성).
         """
 
+        if self.min_interval <= 0:
+            return
+        global _last_request_monotonic
+        with _throttle_lock:
+            wait = self.min_interval - (time.monotonic() - _last_request_monotonic)
+            if wait > 0:
+                time.sleep(wait)
+            _last_request_monotonic = time.monotonic()
+
+    def _chat_json(
+        self, messages: list[dict[str, str]], *, model: str
+    ) -> dict[str, Any]:
+        """messages 를 ``model`` 로 보내 JSON 객체 응답을 받아 방어적으로 파싱한다.
+
+        분류(classify)와 보강(enrich)이 공유하는 저수준 호출. 503(일시 과부하)만 짧게
+        재시도하고, 429 를 포함한 그 밖의 비 2xx 는 ``raise_for_status`` 로 예외를 던져
+        상위 캐스케이드가 다음 모델(또는 결정론적 폴백)로 넘어가게 한다. 상태 플래그
+        (mark_ok/mark_degraded)는 캐스케이드 레벨(classify/enrich)이 책임진다.
+        """
+
+        self._throttle()
+
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "temperature": 0,
             # 대부분의 OpenAI 호환 제공자(OpenAI/Gemini/DeepSeek/Groq)가 지원.
@@ -260,12 +320,8 @@ class LLMClient:
                     time.sleep(_RETRY_BACKOFF * (attempt + 1))
                     continue
                 break
-            # 429(사용량/레이트리밋)로 폴백 전환 → 프론트 배너용 상태 플래그.
-            if response.status_code == 429:
-                mark_degraded("quota")
             response.raise_for_status()
             body = response.json()
-            mark_ok()
 
         content_text = body["choices"][0]["message"]["content"]
         return extract_json(content_text)
@@ -281,21 +337,28 @@ class LLMClient:
 
         original = content or ""
         if not self.enabled:
+            mark_degraded("disabled")
             return self._enrich_fallback(original, note="LLM_API_KEY 미설정")
 
         truncated = original[:ENRICH_MAX_CONTENT_CHARS]
-        try:
-            data = self._chat_json(
-                build_enrichment_messages(title=title, content=truncated)
-            )
-            return self._parse_enrichment(data, original)
-        except Exception as exc:
-            logger.warning(
-                "LLM 보강 호출/파싱 실패 → 오프라인 폴백 전환 (model=%s): %s",
-                self.model,
-                exc,
-            )
-            return self._enrich_fallback(original, note="LLM 보강 실패")
+        messages = build_enrichment_messages(title=title, content=truncated)
+
+        # 1차 → 2차 모델 순으로 시도. 하나라도 성공하면 정상(mark_ok) 후 반환.
+        for model in self.models:
+            try:
+                data = self._chat_json(messages, model=model)
+                enrichment = self._parse_enrichment(data, original)
+                mark_ok()
+                return enrichment
+            except Exception as exc:
+                logger.info(
+                    "LLM 보강 실패(model=%s) → 다음 계층 시도: %s", model, exc
+                )
+
+        # 모든 LLM 계층이 실패 → 배너 플래그(quota) + 오프라인(원문 보존) 폴백.
+        logger.warning("모든 LLM 보강 계층 실패 → 오프라인 폴백 (models=%s)", self.models)
+        mark_degraded("quota")
+        return self._enrich_fallback(original, note="모든 LLM 계층 실패")
 
     def _parse_enrichment(
         self, data: dict[str, Any], original_content: str

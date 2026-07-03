@@ -89,18 +89,32 @@ export async function getSourceCatalog() {
   return Array.isArray(data) ? data.map(normalizeCatalogItem) : [];
 }
 
-// 온디맨드 동기화: 해당 소스를 즉시 크롤+선별한다.
-// 백엔드: { crawled, fetched, new_notices, inbox_added, message }
+// 온디맨드 동기화(비동기 시작): 백엔드가 백그라운드 작업을 큐에 넣고 즉시 반환한다.
+// 백엔드: { status: "started", source_id }. 미지원 사이트는 400 → 호출자가 처리한다.
 export async function syncSource(sourceId) {
   const data = await apiRequest(`/api/sources/${sourceId}/sync/`, {
     method: "POST",
     body: JSON.stringify({}),
   });
   return {
-    crawled: data?.crawled ?? false,
-    fetched: Number(data?.fetched ?? 0),
-    newNotices: Number(data?.new_notices ?? 0),
-    inboxAdded: Number(data?.inbox_added ?? 0),
-    message: data?.message ?? "",
+    status: data?.status ?? "started",
+    sourceId: data?.source_id ?? sourceId,
   };
+}
+
+// 동기화 진행 상태 폴링: 구독 사이트들의 작업 상태 맵을 반환한다.
+// 백엔드: { jobs: { "<source_id>": { status, inbox_added, message } } } (idle 은 생략).
+// → { [sourceId:number]: { status, inboxAdded, message } } 로 정규화한다.
+export async function getSyncStatus() {
+  const data = await apiRequest("/api/sources/sync/status/");
+  const jobs = (data && data.jobs) || {};
+  const normalized = {};
+  for (const [sourceId, job] of Object.entries(jobs)) {
+    normalized[Number(sourceId)] = {
+      status: job?.status ?? "running",
+      inboxAdded: Number(job?.inbox_added ?? 0),
+      message: job?.message ?? "",
+    };
+  }
+  return normalized;
 }

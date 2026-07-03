@@ -179,14 +179,19 @@ SIMPLE_JWT = {
 }
 
 # ── AI 공지 선별 (LLM, OpenAI 호환 Chat Completions) ─────────────────────────
-# 기본은 Google Gemini(가성비·무료 티어). LLM_BASE_URL/LLM_MODEL/LLM_API_KEY 만 바꾸면
-# OpenAI·DeepSeek·Groq 등으로 교체 가능. 키가 비면 키워드 폴백으로 동작한다.
+# 3단 캐스케이드로 무료 티어 한도를 방어한다: 1차(LLM_MODEL) → 2차(LLM_FALLBACK_MODEL,
+# 같은 base_url·api_key, 모델 문자열만 다름) → 3차(결정론적 키워드 폴백). 두 LLM 계층이
+# 모두 실패할 때만 키워드 폴백 배너가 뜬다. 모든 요청은 프로세스 전역 스로틀
+# (LLM_MIN_REQUEST_INTERVAL_SECONDS)로 최소 간격을 두어 분당 요청수(RPM)를 낮춘다.
+# LLM_BASE_URL/LLM_MODEL/LLM_API_KEY 만 바꾸면 OpenAI·DeepSeek·Groq 등으로 교체 가능.
 LLM_API_KEY = env('LLM_API_KEY', default='')
 LLM_BASE_URL = env('LLM_BASE_URL', default='https://generativelanguage.googleapis.com/v1beta/openai')
-LLM_MODEL = env('LLM_MODEL', default='gemini-2.5-flash-lite')
+LLM_MODEL = env('LLM_MODEL', default='gemini-2.5-flash-lite')  # 1차(primary)
+LLM_FALLBACK_MODEL = env('LLM_FALLBACK_MODEL', default='gemma-3-27b-it')  # 2차 LLM 폴백(같은 키·URL)
 LLM_TIMEOUT_SECONDS = env.float('LLM_TIMEOUT_SECONDS', default=30.0)
 LLM_MAX_CONTENT_CHARS = env.int('LLM_MAX_CONTENT_CHARS', default=2000)
 LLM_RELEVANCE_THRESHOLD = env.float('LLM_RELEVANCE_THRESHOLD', default=0.5)  # inbox/알림 최소 관련도
+LLM_MIN_REQUEST_INTERVAL_SECONDS = env.float('LLM_MIN_REQUEST_INTERVAL_SECONDS', default=4.5)  # 요청 간 최소 간격(초, ~15 RPM)
 
 # ── 이메일 알림 (SMTP) ───────────────────────────────────────────────────────
 # 기본은 콘솔 백엔드(자격 증명 없이 동작). 587 STARTTLS 가 막히는 망에서는 .env 에서

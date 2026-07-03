@@ -3,8 +3,6 @@ import {
   Sparkles,
   Plus,
   X,
-  Mail,
-  MessageSquare,
   Check,
   Loader2,
   ArrowRight,
@@ -15,6 +13,7 @@ import {
   Globe,
 } from "lucide-react";
 import logo from "../assets/logo.png";
+import { GmailLogo, SlackLogo } from "./BrandLogos.jsx";
 import SlackWebhookHelp from "./SlackWebhookHelp.jsx";
 import SiteCatalog from "./SiteCatalog.jsx";
 import { useToast } from "../context/toast.js";
@@ -317,7 +316,7 @@ function OnboardingWizard({ user, onComplete }) {
               <div className="onbChannelBlock">
                 <div className="onbChannelTop">
                   <span className="onbChannelIcon email">
-                    <Mail size={20} />
+                    <GmailLogo size={22} />
                   </span>
                   <div className="onbChannelMeta">
                     <strong>이메일 알림</strong>
@@ -358,7 +357,7 @@ function OnboardingWizard({ user, onComplete }) {
               <div className="onbChannelBlock">
                 <div className="onbChannelTop">
                   <span className="onbChannelIcon slack">
-                    <MessageSquare size={20} />
+                    <SlackLogo size={22} />
                   </span>
                   <div className="onbChannelMeta">
                     <strong>

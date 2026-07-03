@@ -1763,11 +1763,10 @@ textarea:focus-visible,
   border-radius: 12px;
   color: #fff;
 }
-.channelIcon.type-email {
-  background: var(--c-primary);
-}
+.channelIcon.type-email,
 .channelIcon.type-slack {
-  background: #4a154b;
+  background: #fff;
+  border: 1px solid #e6e9f0;
 }
 .channelInfo {
   flex: 1;
@@ -2751,11 +2750,9 @@ button:disabled {
   border-radius: 8px;
   color: #fff;
 }
-.previewFloat.mail .pvfIcon {
-  background: var(--c-primary);
-}
+.previewFloat.mail .pvfIcon,
 .previewFloat.slack .pvfIcon {
-  background: #4a154b;
+  background: transparent;
 }
 @keyframes floatY {
   0%, 100% {
@@ -3244,11 +3241,10 @@ button:disabled {
   color: #fff;
   flex-shrink: 0;
 }
-.onbChannelIcon.email {
-  background: var(--c-primary);
-}
+.onbChannelIcon.email,
 .onbChannelIcon.slack {
-  background: #4a154b;
+  background: #fff;
+  border: 1px solid #e6e9f0;
 }
 .onbChannelMeta {
   flex: 1;

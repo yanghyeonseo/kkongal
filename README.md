@@ -56,7 +56,7 @@ flowchart LR
 | Frontend | React 19, Vite, JavaScript(JSX), lucide-react |
 | Backend | Python 3.12, Django 6, Django REST Framework, SQLite |
 | Crawler | httpx, BeautifulSoup(lxml), pydantic — 정적 HTML |
-| AI | OpenAI 호환 LLM (기본값 Google Gemini 2.5 Flash‑Lite) |
+| AI | OpenAI 호환 LLM 3단 캐스케이드 (1차 Gemini Flash‑Lite → 2차 Gemma → 결정론적 폴백) |
 | Alert | 이메일(SMTP), 슬랙(Incoming Webhook) |
 
 ```
@@ -121,14 +121,14 @@ npm run dev                          # http://localhost:3000 (→ /api 는 백�
 모든 비밀 값은 `backend/.env` 로 관리하며 커밋하지 않는다(`backend/.env.example` 참고). 핵심 항목:
 
 - `SECRET_KEY` — Django 시크릿.
-- `LLM_API_KEY`(선택), `LLM_BASE_URL`, `LLM_MODEL` — **세 값만 바꾸면** OpenAI·DeepSeek·Groq 등 OpenAI 호환 제공자로 교체된다. 키가 비면 키워드 폴백으로 동작한다.
+- `LLM_API_KEY`(선택), `LLM_BASE_URL`, `LLM_MODEL`(1차), `LLM_FALLBACK_MODEL`(2차) — AI 선별·보강은 **3단 캐스케이드**(1차 `LLM_MODEL` → 2차 `LLM_FALLBACK_MODEL` → 결정론적 키워드 폴백)로 동작한다. 두 LLM 계층은 **같은 `LLM_BASE_URL`·`LLM_API_KEY`** 를 공유하고 모델 문자열만 다르다(제공자 교체 = base_url·model·key 변경 → OpenAI·DeepSeek·Groq 등). 키가 비거나 두 LLM 계층이 모두 실패하면 키워드 폴백으로 동작한다. `LLM_MIN_REQUEST_INTERVAL_SECONDS`(기본 4.5초)는 요청 간 최소 간격을 둬 무료 티어 분당 한도(~15 RPM)를 방어한다.
 - 이메일 `EMAIL_*` — 기본은 콘솔 출력. 실제 발송은 `EMAIL_BACKEND=...smtp.EmailBackend` + SMTP 자격 증명. **587(STARTTLS)이 막히는 망에서는 465(SSL): `EMAIL_PORT=465`·`EMAIL_USE_SSL=True`·`EMAIL_USE_TLS=False`** 로 전환한다.
 - `FRONTEND_URL` — 알림 메시지의 "대시보드에서 보기" 링크 등에 사용.
 - 슬랙 Webhook 은 서버 설정이 아니라 **사용자별로 웹 UI(알림 설정)에서** 등록한다.
 
 ## 유의사항
 
-- **무료 LLM 할당량**: 기본 Gemini 무료 티어는 사용량 소진 시 429 가 날 수 있다. 이때는 자동으로 키워드 폴백으로 전환되고 대시보드에 "키워드 기반 임시 동작 중" 배너가 뜬다(`GET /api/ai/status/`). 잠시 후 자동 정상화된다.
+- **무료 LLM 할당량 · 3단 캐스케이드**: 무료 티어는 사용량 소진 시 429 가 날 수 있다. 이때는 먼저 2차 폴백 모델(`LLM_FALLBACK_MODEL`, 같은 키·URL)로 자동 전환하고, **두 LLM 계층이 모두 실패할 때만** 키워드 폴백으로 내려가며 대시보드에 "키워드 기반 임시 동작 중" 배너가 뜬다(`GET /api/ai/status/`). 요청 간 최소 간격(`LLM_MIN_REQUEST_INTERVAL_SECONDS`)으로 분당 요청수(RPM)를 방어하며, 잠시 후 자동 정상화된다.
 - **비용 최소화(NFR-6)**: 보강은 공지당 1회, 선별은 `(공지,사용자)` 쌍당 1회만 LLM 을 부른다. 상시 스케줄러 실행은 비용이 누적되므로 데모에서는 `run_scheduler --once` 나 동기화 버튼을 권장한다.
 - **이메일 587 vs 465**: 위 환경 변수 참고. TLS(587)와 SSL(465)은 동시에 켤 수 없다.
 - **데모 시드 없음**: 별도 시드 명령은 두지 않는다. 실제 데이터는 사이트 등록 후 크롤/동기화로 채운다(테스트는 각 앱이 필요한 객체를 직접 생성).

@@ -3,14 +3,13 @@ import {
   Sparkles,
   ArrowRight,
   Check,
-  Mail,
-  MessageSquare,
   PenLine,
   Globe,
   BellRing,
   Rss,
 } from "lucide-react";
 import logo from "../assets/logo.png";
+import { GmailLogo, SlackLogo } from "./BrandLogos.jsx";
 
 const HOW_STEPS = [
   {
@@ -186,13 +185,13 @@ function Landing({ onOpenAuth }) {
 
           <div className="previewFloat mail">
             <span className="pvfIcon">
-              <Mail size={15} />
+              <GmailLogo size={17} />
             </span>
             메일 발송됨
           </div>
           <div className="previewFloat slack">
             <span className="pvfIcon">
-              <MessageSquare size={15} />
+              <SlackLogo size={17} />
             </span>
             슬랙 알림
           </div>

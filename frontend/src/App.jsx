@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 import Header from "./components/Header.jsx";
@@ -19,7 +19,12 @@ import {
   toggleInboxNoticeSave,
   markInboxNoticeRead,
 } from "./api/inboxApi.js";
-import { getNoticeSources, syncSource, updateSourceName } from "./api/sourceApi.js";
+import {
+  getNoticeSources,
+  getSyncStatus,
+  syncSource,
+  updateSourceName,
+} from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import { getAiStatus } from "./api/aiApi.js";
 import {
@@ -52,6 +57,12 @@ function App() {
   const [authMode, setAuthMode] = useState(null);
 
   const [syncingSourceIds, setSyncingSourceIds] = useState([]);
+  // 폴링 루프가 최신 값을 stale closure 없이 읽도록 ref 로 미러링한다.
+  const syncingIdsRef = useRef([]);
+  const sourcesRef = useRef([]);
+  const pollTimerRef = useRef(null);
+  const pollActiveRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const filters = useNoticeFilters(notices);
   const { setActiveSourceIds } = filters;
@@ -122,6 +133,82 @@ function App() {
     setAiStatus(await getAiStatus());
   }, []);
 
+  // 진행 중 동기화를 최신값으로 폴링하기 위한 ref 미러링.
+  useEffect(() => {
+    syncingIdsRef.current = syncingSourceIds;
+  }, [syncingSourceIds]);
+  useEffect(() => {
+    sourcesRef.current = sources;
+  }, [sources]);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    pollActiveRef.current = false;
+  }, []);
+
+  // 한 폴링 주기: 상태 맵을 받아 done/failed 로 끝난 사이트마다 토스트를 띄우고
+  // syncingSourceIds 에서 제거한다. 완료가 있었던 주기에만 인박스를 한 번 새로고침한다.
+  // 백엔드 워커가 순차 처리하므로 완료(→토스트)는 사이트별로 하나씩 나타난다.
+  const pollSyncStatus = useCallback(async () => {
+    if (syncingIdsRef.current.length === 0) {
+      stopPolling();
+      return;
+    }
+    let jobs;
+    try {
+      jobs = await getSyncStatus();
+    } catch {
+      return; // 일시적 실패는 다음 주기에 재시도
+    }
+    if (!isMountedRef.current) return;
+
+    const completed = syncingIdsRef.current
+      .map((id) => ({ id, job: jobs[id] }))
+      .filter(
+        ({ job }) => job && (job.status === "done" || job.status === "failed"),
+      );
+    if (completed.length === 0) return;
+
+    for (const { id, job } of completed) {
+      const site = sourcesRef.current.find((source) => source.id === id);
+      const siteName = site?.displayName || site?.name || "사이트";
+      if (job.status === "done") {
+        const detail =
+          job.inboxAdded > 0 ? `${job.inboxAdded}건 새로 추천` : "새 공지 없음";
+        toast.success(`${siteName} 동기화 완료 · ${detail}`);
+      } else {
+        toast.error(job.message || `${siteName} 동기화 실패`);
+      }
+    }
+
+    const completedIds = new Set(completed.map(({ id }) => id));
+    setSyncingSourceIds((prev) => prev.filter((id) => !completedIds.has(id)));
+
+    try {
+      setNotices(await getMyInboxNotices());
+    } catch {
+      // 인박스 새로고침 실패는 조용히 무시
+    }
+    refreshAiStatus();
+  }, [toast, refreshAiStatus, stopPolling]);
+
+  const ensurePolling = useCallback(() => {
+    if (pollActiveRef.current) return;
+    pollActiveRef.current = true;
+    pollTimerRef.current = setInterval(pollSyncStatus, 2500);
+  }, [pollSyncStatus]);
+
+  // 언마운트 시 폴링 정리(인터벌 해제 + 이후 setState 차단).
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      stopPolling();
+    };
+  }, [stopPolling]);
+
   useEffect(() => {
     if (!currentUser) return;
     loadDashboardData();
@@ -153,6 +240,8 @@ function App() {
       setNotices([]);
       setSources([]);
       setInterests([]);
+      setSyncingSourceIds([]);
+      stopPolling();
       filters.resetForSignedOut();
       setAiStatus({ degraded: false, reason: "ok", message: "" });
       toast.info("로그아웃했어요.");
@@ -177,67 +266,57 @@ function App() {
     setActiveSourceIds((prev) => prev.filter((id) => id !== source.id));
   };
 
-  // 온디맨드 동기화: 해당 사이트를 즉시 크롤+선별한 뒤 인박스를 새로고침한다.
+  // 온디맨드 동기화(비동기): POST 로 백그라운드 작업을 시작(즉시 반환)하고 사이트를
+  // syncingSourceIds 에 넣은 뒤, 폴링 루프가 완료를 사이트별로 반영하게 한다.
   // opts.silentUnsupported: 첫 구독 직후 자동 호출 시 '자동 수집 미지원(400)'은 조용히 넘긴다.
   const handleSyncSource = useCallback(
     async (sourceId, opts = {}) => {
-      setSyncingSourceIds((prev) =>
-        prev.includes(sourceId) ? prev : [...prev, sourceId],
-      );
       try {
-        const result = await syncSource(sourceId);
-        setNotices(await getMyInboxNotices());
-
-        const added = result.inboxAdded || result.newNotices || 0;
-        if (added > 0) {
-          toast.success(`${added}건 새로 추천했어요.`);
-        } else if (result.message) {
-          toast.info(result.message);
-        } else {
-          toast.info("새로 추천할 공지가 없어요.");
-        }
+        await syncSource(sourceId); // POST → { status: "started" } (빠르게 반환)
       } catch (error) {
         if (opts.silentUnsupported && error?.status === 400) {
           console.info("sync skipped:", error.message);
         } else {
           toast.error(error.message || "동기화에 실패했어요.");
         }
-      } finally {
-        setSyncingSourceIds((prev) => prev.filter((id) => id !== sourceId));
-        // 동기화가 쿼터를 소진시켰거나 반대로 정상화됐을 수 있어 상태를 다시 확인.
-        refreshAiStatus();
+        return;
       }
+      setSyncingSourceIds((prev) =>
+        prev.includes(sourceId) ? prev : [...prev, sourceId],
+      );
+      ensurePolling();
     },
-    [toast, refreshAiStatus],
+    [toast, ensurePolling],
   );
 
-  // 전체 동기화: 구독 중인 모든 사이트를 병렬로 sync 하고, 결과를 한 번에 요약한다.
+  // 전체 동기화: 구독 중인 모든 사이트의 백그라운드 작업을 시작(enqueue)하고 폴링에 맡긴다.
+  // 워커가 순차 처리하므로 완료 토스트는 사이트별로 하나씩 나타난다.
   const handleSyncAll = useCallback(async () => {
     const ids = sources.filter((source) => source.isSubscribed).map((source) => source.id);
     if (ids.length === 0) return;
 
-    setSyncingSourceIds(ids);
-    let added = 0;
+    const enqueued = [];
     await Promise.all(
       ids.map(async (id) => {
         try {
-          const result = await syncSource(id);
-          added += result.inboxAdded || result.newNotices || 0;
+          await syncSource(id);
+          enqueued.push(id);
         } catch {
           // 개별 사이트 실패(자동 수집 미지원 등)는 무시하고 전체는 계속 진행
         }
       }),
     );
-    try {
-      setNotices(await getMyInboxNotices());
-    } catch {
-      // 인박스 새로고침 실패는 조용히 무시
+    if (enqueued.length === 0) {
+      toast.info("동기화할 수 있는 사이트가 없어요.");
+      return;
     }
-    setSyncingSourceIds([]);
-    refreshAiStatus();
-    if (added > 0) toast.success(`${added}건 새로 추천했어요.`);
-    else toast.info("새로 추천할 공지가 없어요.");
-  }, [sources, toast, refreshAiStatus]);
+    setSyncingSourceIds((prev) => {
+      const next = new Set(prev);
+      enqueued.forEach((id) => next.add(id));
+      return Array.from(next);
+    });
+    ensurePolling();
+  }, [sources, toast, ensurePolling]);
 
   const handleOnboardingComplete = useCallback(
     (user) => {

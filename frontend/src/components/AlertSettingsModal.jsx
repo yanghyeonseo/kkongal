@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Mail, MessageSquare, Trash2, Send, Loader2, Plus } from "lucide-react";
+import { Trash2, Send, Loader2, Plus } from "lucide-react";
 import ModalShell from "./ModalShell.jsx";
 import SlackWebhookHelp from "./SlackWebhookHelp.jsx";
+import { GmailLogo, SlackLogo } from "./BrandLogos.jsx";
 import { useToast } from "../context/toast.js";
 import {
   getAlertChannels,
@@ -12,8 +13,8 @@ import {
 } from "../api/alertApi.js";
 
 const CHANNEL_META = {
-  email: { label: "이메일", Icon: Mail },
-  slack: { label: "슬랙", Icon: MessageSquare },
+  email: { label: "이메일", Icon: GmailLogo },
+  slack: { label: "슬랙", Icon: SlackLogo },
 };
 
 function channelSummary(channel) {
@@ -215,7 +216,7 @@ function AlertSettingsModal({ currentUser, onClose }) {
                     className={`channelCard ${channel.isActive ? "" : "inactive"}`}
                   >
                     <div className={`channelIcon type-${channel.type}`}>
-                      <Icon size={18} />
+                      <Icon size={24} />
                     </div>
 
                     <div className="channelInfo">
@@ -311,7 +312,7 @@ function AlertSettingsModal({ currentUser, onClose }) {
 
           <div className="addChannelBlock">
             <label className="addChannelLabel" htmlFor="alertEmailInput">
-              <Mail size={15} /> 이메일
+              <GmailLogo size={16} /> 이메일
             </label>
             <div className="addChannelRow">
               <input
@@ -342,7 +343,7 @@ function AlertSettingsModal({ currentUser, onClose }) {
 
           <div className="addChannelBlock">
             <label className="addChannelLabel" htmlFor="alertSlackInput">
-              <MessageSquare size={15} /> 슬랙 Webhook URL
+              <SlackLogo size={16} /> 슬랙 Webhook URL
               <SlackWebhookHelp />
             </label>
             <div className="addChannelRow">

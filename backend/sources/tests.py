@@ -14,6 +14,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -25,11 +26,13 @@ from crawler.config_loader import load_config
 from crawler.schemas import CrawlReport
 from crawler.service import NoticeCrawlService
 from notices.models import InboxNotice, Notice
+from sources import sync_jobs
 from sources.models import NoticeSource, SourceSubscription
 from sources.views import (
     SourceCatalogView,
     SourceDetailView,
     SourceSubscriptionListView,
+    SourceSyncStatusView,
     SourceSyncView,
 )
 
@@ -302,9 +305,14 @@ class ClassifyNoticesForUserTests(TestCase):
 
 
 @override_settings(LLM_API_KEY="", LLM_RELEVANCE_THRESHOLD=0.5)
-class SyncViewTests(TestCase):
+class RunSyncForSourceTests(TestCase):
+    """sync_jobs.run_sync_for_source 직접 단위 테스트(오프라인).
+
+    워커가 호출하는 실제 작업 로직: 크롤→보강→선별→발송. 크롤은 목킹(네트워크 0),
+    알림 발송(dispatch_pending)도 목킹(이메일 0)해 결정적으로 검증한다.
+    """
+
     def setUp(self) -> None:
-        self.factory = APIRequestFactory()
         self.source = NoticeSource.objects.create(name="SNU CSE", url=SUPPORTED_URL)
         self.user = User.objects.create_user(
             username="syncer", email="s@example.com", job="백엔드"
@@ -313,18 +321,11 @@ class SyncViewTests(TestCase):
             user_id=self.user, keyword="채용", description="채용 공고", priority=5
         )
         SourceSubscription.objects.create(user_id=self.user, source_id=self.source)
-        # 동기화 후 알림 발송은 논블로킹(데몬 스레드)이다. 테스트에서는 실제 스레드가
-        # 별도 커넥션으로 DB 를 건드려 비결정적이 되지 않도록 목킹하고, '트리거 계약'은
-        # 아래 전용 테스트에서 mock 호출로 검증한다(senders 의 async 패턴과 동일).
-        patcher = patch("sources.views._dispatch_alerts_async")
+        self.config = load_config()
+        # 알림 발송은 워커 내부에서 동기 호출된다 — 실제 발송 대신 목킹해 트리거만 검증.
+        patcher = patch("alert.service.dispatch_pending")
         self.mock_dispatch = patcher.start()
         self.addCleanup(patcher.stop)
-
-    def _sync(self, source_id, user=None):
-        request = self.factory.post(f"/api/sources/{source_id}/sync/")
-        if user is not None:
-            force_authenticate(request, user=user)
-        return SourceSyncView.as_view()(request, source_id=source_id)
 
     def _make_notice(self, suffix, *, title="백엔드 채용 공고", published_delta=None):
         published_at = None
@@ -339,26 +340,8 @@ class SyncViewTests(TestCase):
             published_at=published_at,
         )
 
-    def test_requires_authentication(self) -> None:
-        response = self._sync(self.source.id)
-        self.assertEqual(response.status_code, 401)
-
-    def test_source_not_found_returns_404(self) -> None:
-        response = self._sync(999999, user=self.user)
-        self.assertEqual(response.status_code, 404)
-
-    def test_unsubscribed_user_forbidden(self) -> None:
-        stranger = User.objects.create_user(username="stranger", email="x@example.com")
-        response = self._sync(self.source.id, user=stranger)
-        self.assertEqual(response.status_code, 403)
-
-    def test_unsupported_url_returns_400(self) -> None:
-        other = NoticeSource.objects.create(name="임의", url=UNSUPPORTED_URL)
-        SourceSubscription.objects.create(user_id=self.user, source_id=other)
-        response = self._sync(other.id, user=self.user)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["detail"], "이 사이트는 자동 수집을 지원하지 않아요.")
+    def _run(self):
+        return sync_jobs.run_sync_for_source(self.user, self.source, self.config)
 
     def test_crawls_and_classifies_new_notice(self) -> None:
         # crawl_recent 를 목킹: 실제 사이트 접속 없이 매칭 공지 1건을 저장하고 리포트 반환.
@@ -369,14 +352,13 @@ class SyncViewTests(TestCase):
         with patch.object(
             NoticeCrawlService, "crawl_recent", create=True, side_effect=fake_crawl
         ) as mocked:
-            response = self._sync(self.source.id, user=self.user)
+            result = self._run()
 
         mocked.assert_called_once()
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["crawled"])
-        self.assertEqual(response.data["fetched"], 1)
-        self.assertEqual(response.data["new_notices"], 1)
-        self.assertEqual(response.data["inbox_added"], 1)
+        self.assertTrue(result["crawled"])
+        self.assertEqual(result["fetched"], 1)
+        self.assertEqual(result["new_notices"], 1)
+        self.assertEqual(result["inbox_added"], 1)
         self.assertEqual(InboxNotice.objects.filter(user_id=self.user).count(), 1)
 
     def test_enriches_only_newly_created_notices(self) -> None:
@@ -390,10 +372,9 @@ class SyncViewTests(TestCase):
 
         with patch.object(
             NoticeCrawlService, "crawl_recent", create=True, side_effect=fake_crawl
-        ), patch.object(SourceSyncView, "_enrich_new_notices") as enrich:
-            response = self._sync(self.source.id, user=self.user)
+        ), patch.object(sync_jobs, "_enrich_new_notices") as enrich:
+            self._run()
 
-        self.assertEqual(response.status_code, 200)
         enrich.assert_called_once()
         (enriched_qs,) = enrich.call_args.args
         enriched_urls = {notice.url for notice in enriched_qs}
@@ -405,17 +386,14 @@ class SyncViewTests(TestCase):
         self.source.save(update_fields=["crawled_at"])
         self._make_notice("existing-1", published_delta=timedelta(hours=1))
 
-        with patch.object(
-            NoticeCrawlService, "crawl_recent", create=True
-        ) as mocked:
-            response = self._sync(self.source.id, user=self.user)
+        with patch.object(NoticeCrawlService, "crawl_recent", create=True) as mocked:
+            result = self._run()
 
         mocked.assert_not_called()
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.data["crawled"])
-        self.assertEqual(response.data["fetched"], 0)
-        self.assertEqual(response.data["new_notices"], 0)
-        self.assertEqual(response.data["inbox_added"], 1)
+        self.assertFalse(result["crawled"])
+        self.assertEqual(result["fetched"], 0)
+        self.assertEqual(result["new_notices"], 0)
+        self.assertEqual(result["inbox_added"], 1)
 
     def test_classifies_at_most_10_most_recent(self) -> None:
         self.source.crawled_at = timezone.now()  # 재크롤 생략(순수 선별만 검증)
@@ -427,11 +405,10 @@ class SyncViewTests(TestCase):
             for i in range(12)
         ]
 
-        response = self._sync(self.source.id, user=self.user)
+        result = self._run()
 
-        self.assertEqual(response.status_code, 200)
         # 가장 최근 10건만 선별된다(비용 상한).
-        self.assertEqual(response.data["inbox_added"], 10)
+        self.assertEqual(result["inbox_added"], 10)
         self.assertEqual(InboxNotice.objects.filter(user_id=self.user).count(), 10)
         # 가장 오래된 2건(11·12번째)은 상한 밖이라 선별되지 않는다.
         for stale in notices[-2:]:
@@ -441,21 +418,19 @@ class SyncViewTests(TestCase):
                 ).exists()
             )
 
-    def test_sync_triggers_async_alert_dispatch_when_recommended(self) -> None:
-        # 새 추천 공지가 생기면 이 사용자의 알림을 논블로킹으로 발송하도록 트리거한다.
+    def test_dispatches_alerts_when_recommended(self) -> None:
+        # 새 추천 공지가 생기면 이 사용자의 알림을 (워커 스레드 내) 동기로 발송한다.
         self.source.crawled_at = timezone.now()  # 재크롤 생략(순수 선별만)
         self.source.save(update_fields=["crawled_at"])
         self._make_notice("rec-1", published_delta=timedelta(minutes=1))
 
-        response = self._sync(self.source.id, user=self.user)
+        result = self._run()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["inbox_added"], 1)
-        # 백그라운드 발송이 이 사용자로 정확히 한 번 트리거된다(응답을 막지 않음).
-        self.mock_dispatch.assert_called_once_with(self.user)
+        self.assertEqual(result["inbox_added"], 1)
+        self.mock_dispatch.assert_called_once_with(user=self.user)
 
-    def test_sync_skips_async_dispatch_when_nothing_recommended(self) -> None:
-        # 추천이 0건이면(관심과 무관한 공지만) 알림 스레드를 띄우지 않는다.
+    def test_skips_dispatch_when_nothing_recommended(self) -> None:
+        # 추천이 0건이면(관심과 무관한 공지만) 발송하지 않는다.
         self.source.crawled_at = timezone.now()
         self.source.save(update_fields=["crawled_at"])
         Notice.objects.create(
@@ -467,26 +442,24 @@ class SyncViewTests(TestCase):
             published_at=timezone.now() - timedelta(minutes=1),
         )
 
-        response = self._sync(self.source.id, user=self.user)
+        result = self._run()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["inbox_added"], 0)
+        self.assertEqual(result["inbox_added"], 0)
         self.mock_dispatch.assert_not_called()
 
-    def test_live_crawl_failure_is_graceful_not_500(self) -> None:
-        # 라이브 사이트 장애(예외)여도 500 대신 crawled=false + 안내 메시지로 200.
+    def test_live_crawl_failure_is_graceful(self) -> None:
+        # 라이브 사이트 장애(예외)여도 예외 대신 crawled=false + 안내 메시지.
         with patch.object(
             NoticeCrawlService,
             "crawl_recent",
             create=True,
             side_effect=RuntimeError("boom"),
         ):
-            response = self._sync(self.source.id, user=self.user)
+            result = self._run()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.data["crawled"])
-        self.assertEqual(response.data["inbox_added"], 0)
-        self.assertIn("가져오지 못했어요", response.data["message"])
+        self.assertFalse(result["crawled"])
+        self.assertEqual(result["inbox_added"], 0)
+        self.assertIn("가져오지 못했어요", result["message"])
 
     def test_crawl_reporting_errors_with_zero_fetched_is_graceful(self) -> None:
         # crawl_recent 가 예외를 삼켜 errors 만 담아 돌려줘도(장애) graceful 처리.
@@ -496,10 +469,209 @@ class SyncViewTests(TestCase):
             create=True,
             side_effect=lambda *a, **k: _report(fetched=0, inserted=0, errors=["fetch failed"]),
         ):
-            response = self._sync(self.source.id, user=self.user)
+            result = self._run()
+
+        self.assertFalse(result["crawled"])
+
+
+class SyncViewTests(TestCase):
+    """POST /api/sources/<id>/sync/ — 동기 검증만 하고 작업을 enqueue 한 뒤 즉시 반환."""
+
+    def setUp(self) -> None:
+        self.factory = APIRequestFactory()
+        self.source = NoticeSource.objects.create(name="SNU CSE", url=SUPPORTED_URL)
+        self.user = User.objects.create_user(
+            username="syncer", email="s@example.com", job="백엔드"
+        )
+        SourceSubscription.objects.create(user_id=self.user, source_id=self.source)
+        # enqueue 는 데몬 워커를 띄우므로 뷰 계약 테스트에서는 목킹한다(스레드/네트워크 0).
+        patcher = patch("sources.sync_jobs.enqueue")
+        self.mock_enqueue = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sync(self, source_id, user=None):
+        request = self.factory.post(f"/api/sources/{source_id}/sync/")
+        if user is not None:
+            force_authenticate(request, user=user)
+        return SourceSyncView.as_view()(request, source_id=source_id)
+
+    def test_requires_authentication(self) -> None:
+        response = self._sync(self.source.id)
+        self.assertEqual(response.status_code, 401)
+        self.mock_enqueue.assert_not_called()
+
+    def test_source_not_found_returns_404(self) -> None:
+        response = self._sync(999999, user=self.user)
+        self.assertEqual(response.status_code, 404)
+        self.mock_enqueue.assert_not_called()
+
+    def test_unsubscribed_user_forbidden(self) -> None:
+        stranger = User.objects.create_user(username="stranger", email="x@example.com")
+        response = self._sync(self.source.id, user=stranger)
+        self.assertEqual(response.status_code, 403)
+        self.mock_enqueue.assert_not_called()
+
+    def test_unsupported_url_returns_400_without_enqueue(self) -> None:
+        other = NoticeSource.objects.create(name="임의", url=UNSUPPORTED_URL)
+        SourceSubscription.objects.create(user_id=self.user, source_id=other)
+        response = self._sync(other.id, user=self.user)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "이 사이트는 자동 수집을 지원하지 않아요.")
+        self.mock_enqueue.assert_not_called()
+
+    def test_sync_enqueues_and_returns_started(self) -> None:
+        response = self._sync(self.source.id, user=self.user)
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.data["crawled"])
+        self.assertEqual(
+            response.data, {"status": "started", "source_id": self.source.id}
+        )
+        # 검증만 통과하면 실제 작업은 워커에 위임한다(요청 사용자·소스로 정확히 1회).
+        self.mock_enqueue.assert_called_once_with(self.user, self.source)
+
+
+class SyncStatusViewTests(TestCase):
+    """GET /api/sources/sync/status/ — 구독 사이트들의 동기화 상태 맵(idle 은 생략)."""
+
+    def setUp(self) -> None:
+        self.factory = APIRequestFactory()
+        self.user = User.objects.create_user(username="poller", email="p@example.com")
+        self.source = NoticeSource.objects.create(name="SNU CSE", url=SUPPORTED_URL)
+        self.other = NoticeSource.objects.create(name="사람인", url=OTHER_SUPPORTED_URL)
+        SourceSubscription.objects.create(user_id=self.user, source_id=self.source)
+        SourceSubscription.objects.create(user_id=self.user, source_id=self.other)
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _get(self, user=None):
+        request = self.factory.get("/api/sources/sync/status/")
+        if user is not None:
+            force_authenticate(request, user=user)
+        return SourceSyncStatusView.as_view()(request)
+
+    def test_requires_authentication(self) -> None:
+        response = self._get()
+        self.assertEqual(response.status_code, 401)
+
+    def test_returns_cached_jobs_map(self) -> None:
+        sync_jobs._set_status(
+            self.user.id, self.source.id, "done", inbox_added=2, message="완료"
+        )
+        response = self._get(user=self.user)
+
+        self.assertEqual(response.status_code, 200)
+        jobs = response.data["jobs"]
+        self.assertEqual(
+            jobs[self.source.id],
+            {"status": "done", "inbox_added": 2, "message": "완료"},
+        )
+        # 상태 엔트리가 없는 구독 사이트는 맵에서 생략된다(idle).
+        self.assertNotIn(self.other.id, jobs)
+
+    def test_scopes_status_to_requesting_user(self) -> None:
+        # 상태 캐시 키는 사용자별이라 다른 사용자의 진행 상태가 섞이지 않는다.
+        stranger = User.objects.create_user(username="stranger2", email="x2@example.com")
+        sync_jobs._set_status(stranger.id, self.source.id, "running")
+
+        response = self._get(user=self.user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["jobs"], {})
+
+
+@override_settings(LLM_API_KEY="", LLM_RELEVANCE_THRESHOLD=0.5)
+class SyncJobsWorkerTests(TestCase):
+    """워커 per-작업 처리(_process_job)와 enqueue→_process_one seam.
+
+    실제 데몬 워커 스레드는 띄우지 않는다(전역 상태·DB 스레드 경합 회피). 작업을 같은
+    스레드에서 동기 처리하고, 스레드 로컬 DB 커넥션 close 는 목킹해 테스트 DB 를 지킨다.
+    """
+
+    def setUp(self) -> None:
+        self.source = NoticeSource.objects.create(name="SNU CSE", url=SUPPORTED_URL)
+        self.user = User.objects.create_user(
+            username="worker", email="w@example.com", job="백엔드"
+        )
+        Interest.objects.create(
+            user_id=self.user, keyword="채용", description="채용 공고", priority=5
+        )
+        SourceSubscription.objects.create(user_id=self.user, source_id=self.source)
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.addCleanup(self._drain_queue)
+
+    @staticmethod
+    def _drain_queue() -> None:
+        # 전역 큐에 남은 작업이 다른 테스트로 새지 않도록 (처리 없이) 비운다.
+        q = sync_jobs._job_queue
+        while not q.empty():
+            try:
+                q.get_nowait()
+                q.task_done()
+            except Exception:  # noqa: BLE001
+                break
+
+    def _make_notice(self, suffix, *, published_delta=None):
+        published_at = None
+        if published_delta is not None:
+            published_at = timezone.now() - published_delta
+        return Notice.objects.create(
+            source_id=self.source,
+            url=f"{SUPPORTED_URL}/{suffix}",
+            title="백엔드 채용 공고",
+            content="백엔드 개발자 채용",
+            publisher="SNU",
+            published_at=published_at,
+        )
+
+    def test_process_job_sets_done_status(self) -> None:
+        self.source.crawled_at = timezone.now()  # rate-limited → 크롤 없이 선별만
+        self.source.save(update_fields=["crawled_at"])
+        self._make_notice("rec-1", published_delta=timedelta(minutes=1))
+
+        with patch("django.db.connection.close"), patch(
+            "alert.service.dispatch_pending"
+        ):
+            sync_jobs._process_job((self.user.id, self.source.id))
+
+        status_map = sync_jobs.get_status_for(self.user, [self.source.id])
+        self.assertEqual(status_map[self.source.id]["status"], "done")
+        self.assertEqual(status_map[self.source.id]["inbox_added"], 1)
+
+    def test_process_job_sets_failed_status_on_error(self) -> None:
+        # 작업 중 예외가 나도 워커는 죽지 않고 terminal 'failed' 상태를 남긴다.
+        with patch("django.db.connection.close"), patch.object(
+            sync_jobs, "run_sync_for_source", side_effect=RuntimeError("boom")
+        ):
+            sync_jobs._process_job((self.user.id, self.source.id))
+
+        status_map = sync_jobs.get_status_for(self.user, [self.source.id])
+        self.assertEqual(status_map[self.source.id]["status"], "failed")
+        self.assertEqual(status_map[self.source.id]["message"], "동기화에 실패했어요.")
+
+    def test_enqueue_sets_running_then_process_one_completes(self) -> None:
+        # enqueue 는 즉시 'running' 을 세우고 큐에 넣는다(데몬 워커는 목킹으로 미기동).
+        with patch.object(sync_jobs, "_ensure_worker") as ensure:
+            sync_jobs.enqueue(self.user, self.source)
+        ensure.assert_called_once()
+
+        running = sync_jobs.get_status_for(self.user, [self.source.id])
+        self.assertEqual(running[self.source.id]["status"], "running")
+
+        # 큐에서 하나 꺼내 동기 처리하면 terminal 'done' 으로 전이한다.
+        with patch("django.db.connection.close"), patch.object(
+            sync_jobs,
+            "run_sync_for_source",
+            return_value={"inbox_added": 3, "message": "완료"},
+        ) as run:
+            self.assertTrue(sync_jobs._process_one(timeout=1))
+        run.assert_called_once()
+
+        done = sync_jobs.get_status_for(self.user, [self.source.id])
+        self.assertEqual(done[self.source.id]["status"], "done")
+        self.assertEqual(done[self.source.id]["inbox_added"], 3)
+        self.assertEqual(done[self.source.id]["message"], "완료")
 
 
 @override_settings(
