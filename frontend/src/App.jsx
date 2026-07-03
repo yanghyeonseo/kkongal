@@ -19,6 +19,7 @@ import {
 } from "./api/inboxApi.js";
 import { getNoticeSources, syncSource, updateSourceName } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
+import { getAiStatus } from "./api/aiApi.js";
 import {
   saveStoredUser,
   clearStoredUser,
@@ -26,7 +27,7 @@ import {
   logout,
 } from "./api/authApi.js";
 
-import { Globe, Plus } from "lucide-react";
+import { Globe, Plus, AlertTriangle, Info, X } from "lucide-react";
 
 import { isAiMatched } from "./utils/relevance.js";
 import { useToast } from "./context/toast.js";
@@ -71,6 +72,16 @@ function App() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [syncingSourceIds, setSyncingSourceIds] = useState([]);
+
+  // AI 파이프라인 저하(쿼터 소진/미설정) 배너 상태.
+  // dismissedReason: 세션 내에서 사용자가 닫은 사유. 상태가 정상으로 돌아갔다가
+  // 다시 저하되면(아래 effect 가 초기화) 배너를 다시 노출한다.
+  const [aiStatus, setAiStatus] = useState({
+    degraded: false,
+    reason: "ok",
+    message: "",
+  });
+  const [aiBannerDismissedReason, setAiBannerDismissedReason] = useState(null);
 
   // 최초 진입 시 쿠키(access_token) 기준으로 로그인 상태를 복원한다.
   useEffect(() => {
@@ -125,10 +136,22 @@ function App() {
     }
   }, [toast]);
 
+  // AI 상태 조회(대시보드 로드 시 · 동기화 완료 후). 실패해도 조용히 정상으로 둔다.
+  const refreshAiStatus = useCallback(async () => {
+    const status = await getAiStatus();
+    setAiStatus(status);
+  }, []);
+
   useEffect(() => {
     if (!currentUser) return;
     loadDashboardData();
-  }, [currentUser, loadDashboardData]);
+    refreshAiStatus();
+  }, [currentUser, loadDashboardData, refreshAiStatus]);
+
+  // 상태가 정상으로 돌아오면 닫기 기억을 초기화 → 이후 다시 저하되면 배너를 재노출.
+  useEffect(() => {
+    if (!aiStatus.degraded) setAiBannerDismissedReason(null);
+  }, [aiStatus.degraded]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -157,6 +180,7 @@ function App() {
       setActiveSourceIds([]);
       setSearchQuery("");
       setSelectedView("all");
+      setAiStatus({ degraded: false, reason: "ok", message: "" });
       toast.info("로그아웃했어요.");
     }
   };
@@ -216,9 +240,11 @@ function App() {
         }
       } finally {
         setSyncingSourceIds((prev) => prev.filter((id) => id !== sourceId));
+        // 동기화가 쿼터를 소진시켰거나 반대로 정상화됐을 수 있어 상태를 다시 확인.
+        refreshAiStatus();
       }
     },
-    [toast],
+    [toast, refreshAiStatus],
   );
 
   // 전체 동기화: 구독 중인 모든 사이트를 병렬로 sync 하고, 결과를 한 번에 요약한다.
@@ -244,9 +270,10 @@ function App() {
       // 인박스 새로고침 실패는 조용히 무시
     }
     setSyncingSourceIds([]);
+    refreshAiStatus();
     if (added > 0) toast.success(`${added}건 새로 추천했어요.`);
     else toast.info("새로 추천할 공지가 없어요.");
-  }, [sources, toast]);
+  }, [sources, toast, refreshAiStatus]);
 
   const handleOnboardingComplete = useCallback(
     (user) => {
@@ -441,6 +468,15 @@ function App() {
     [notices, selectedNoticeId],
   );
 
+  // AI 저하 배너: 저하 상태이고, 이번 세션에 같은 사유로 닫지 않았을 때만 노출.
+  const showAiBanner =
+    aiStatus.degraded && aiBannerDismissedReason !== aiStatus.reason;
+  const aiBannerText =
+    aiStatus.message ||
+    (aiStatus.reason === "quota"
+      ? "AI 사용량이 일시적으로 소진돼 키워드 기반으로 임시 동작 중이에요. 잠시 후 다시 정상화됩니다."
+      : "AI 키가 설정되지 않아 키워드 기반으로 동작 중이에요.");
+
   const renderNoticeArea = () => {
     if (dashboardLoading) {
       return (
@@ -565,6 +601,30 @@ function App() {
           />
 
           <main className="main">
+            {showAiBanner && (
+              <div
+                className={`aiStatusBanner ${aiStatus.reason === "quota" ? "warn" : "info"}`}
+                role="status"
+              >
+                <span className="aiStatusIcon" aria-hidden="true">
+                  {aiStatus.reason === "quota" ? (
+                    <AlertTriangle size={18} />
+                  ) : (
+                    <Info size={18} />
+                  )}
+                </span>
+                <p className="aiStatusText">{aiBannerText}</p>
+                <button
+                  type="button"
+                  className="aiStatusClose"
+                  onClick={() => setAiBannerDismissedReason(aiStatus.reason)}
+                  aria-label="배너 닫기"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
             <section className="noticeSection">
               <div className="noticeTitleRow">
                 <div>

@@ -138,6 +138,7 @@ function Sidebar({
                     <SourceFavicon
                       name={source.displayName}
                       faviconUrl={source.faviconUrl}
+                      siteUrl={source.url}
                       size={22}
                       rounded="7px"
                     />

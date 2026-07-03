@@ -2420,10 +2420,14 @@ textarea:focus-visible,
   color: var(--c-danger);
 }
 .priorityBadge {
-  padding: 1px 8px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 .priorityBadge.p2 {
   background: #ffe9e9;
@@ -4371,14 +4375,17 @@ button:disabled {
   white-space: nowrap;
 }
 .catalogCat {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 1px 9px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  margin-top: 5px;
+  padding: 0 10px;
   border-radius: 999px;
   background: #eef2f7;
   color: #6b7480;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 .catalogToggle {
   width: 34px;
@@ -4711,7 +4718,6 @@ button.aiRow {
 .authSelect,
 .addChannelRow input,
 .addTagInputRow input,
-.interestDescInput,
 .onbChipRow input,
 .onbInput,
 .urlRegisterInput {
@@ -4728,31 +4734,40 @@ button.aiRow {
   outline: 0;
   transition: border-color var(--dur) var(--ease-out);
 }
-.interestDescInput {
-  height: auto;
-  min-height: 60px;
-}
 .authInputGroup input::placeholder,
 .addChannelRow input::placeholder,
 .addTagInputRow input::placeholder,
-.interestDescInput::placeholder,
 .onbChipRow input::placeholder,
 .onbInput::placeholder,
 .urlRegisterInput::placeholder {
   color: #98a2b3;
   font-weight: 500;
 }
+/* Underline inputs: focus = underline color change only (no box/outline/ring).
+   :focus-visible listed too so the global a11y outline never boxes these. */
 .authInputGroup input:focus,
 .authSelect:focus,
 .addChannelRow input:focus,
 .addTagInputRow input:focus,
-.interestDescInput:focus,
 .onbChipRow input:focus,
 .onbInput:focus,
-.urlRegisterInput:focus {
+.urlRegisterInput:focus,
+.authInputGroup input:focus-visible,
+.authSelect:focus-visible,
+.addChannelRow input:focus-visible,
+.addTagInputRow input:focus-visible,
+.onbChipRow input:focus-visible,
+.onbInput:focus-visible,
+.urlRegisterInput:focus-visible {
   border-color: var(--c-primary);
   background: transparent;
   box-shadow: none;
+  outline: none;
+}
+/* Sidebar inline rename keeps its tinted box but drops the focus outline too. */
+.siteRenameInput:focus,
+.siteRenameInput:focus-visible {
+  outline: none;
 }
 .authInputGroup.hasError input,
 .authInputGroup.hasError .authSelect {
@@ -4766,6 +4781,17 @@ button.aiRow {
 .onbChipRow,
 .urlRegisterRow {
   align-items: center;
+}
+
+/* ---- Interest natural-language description = boxed textarea (prose) ----
+   Short keyword stays underline; the description is multi-line prose so it
+   uses the rounded, padded, resizable box defined above (not the underline). */
+.interestDescInput {
+  min-height: 64px;
+}
+.interestDescInput:focus,
+.interestDescInput:focus-visible {
+  outline: none;
 }
 
 /* ---- Source favicon avatar (sidebar / card / catalog) ---- */
@@ -4783,9 +4809,9 @@ button.aiRow {
   border: 1px solid var(--c-border);
 }
 .sourceFavicon img {
-  width: 62%;
-  height: 62%;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   display: block;
 }
 
@@ -4858,16 +4884,17 @@ button.aiRow {
 }
 .noticeAiSpark {
   color: var(--c-ai);
-  filter: drop-shadow(0 0 3px rgba(106, 92, 255, 0.55));
+  /* omit shadow color → uses currentColor, so the glow follows the score tier */
+  filter: drop-shadow(0 0 3px currentColor);
   animation: aiPulse 2.6s var(--ease-out) infinite;
 }
 @keyframes aiPulse {
   0%,
   100% {
-    filter: drop-shadow(0 0 2px rgba(106, 92, 255, 0.45));
+    filter: drop-shadow(0 0 2px currentColor);
   }
   50% {
-    filter: drop-shadow(0 0 7px rgba(106, 92, 255, 0.9));
+    filter: drop-shadow(0 0 6px currentColor);
   }
 }
 .noticeAiMark b {
@@ -4875,6 +4902,48 @@ button.aiRow {
   font-weight: 900;
   letter-spacing: -0.02em;
   color: var(--c-ai-ink);
+}
+
+/* AI match % — tint by score tier (high = positive emerald, mid = brand
+   violet, low = muted slate). Glow is preserved via currentColor above. */
+.noticeAiMark.tier-high .noticeAiSpark {
+  color: #12b76a;
+}
+.noticeAiMark.tier-high .noticeAiGlow {
+  background: radial-gradient(
+    circle at center,
+    rgba(18, 183, 106, 0.24),
+    rgba(18, 183, 106, 0) 72%
+  );
+}
+.noticeAiMark.tier-high b {
+  color: #0f9d63;
+}
+.noticeAiMark.tier-mid .noticeAiSpark {
+  color: var(--c-ai);
+}
+.noticeAiMark.tier-mid .noticeAiGlow {
+  background: radial-gradient(
+    circle at center,
+    rgba(106, 92, 255, 0.22),
+    rgba(106, 92, 255, 0) 72%
+  );
+}
+.noticeAiMark.tier-mid b {
+  color: var(--c-ai-ink);
+}
+.noticeAiMark.tier-low .noticeAiSpark {
+  color: #94a0b0;
+}
+.noticeAiMark.tier-low .noticeAiGlow {
+  background: radial-gradient(
+    circle at center,
+    rgba(100, 112, 128, 0.18),
+    rgba(100, 112, 128, 0) 72%
+  );
+}
+.noticeAiMark.tier-low b {
+  color: #64707f;
 }
 .noticeContent {
   flex: 1;
@@ -5134,6 +5203,31 @@ button.aiRow {
   font-weight: 800;
   color: #8378d6;
 }
+/* Detail seal tint mirrors the card AI mark tiers (base = mid/violet). */
+.detailAiSeal.tier-high {
+  background: linear-gradient(135deg, #e6f7ee, #d5f2e2);
+  color: #0f9d63;
+  box-shadow: inset 0 0 0 1px rgba(18, 183, 106, 0.16);
+}
+.detailAiSeal.tier-high svg {
+  color: #12b76a;
+  filter: drop-shadow(0 0 3px rgba(18, 183, 106, 0.5));
+}
+.detailAiSeal.tier-high span {
+  color: #3fae7d;
+}
+.detailAiSeal.tier-low {
+  background: linear-gradient(135deg, #eef1f6, #e5eaf0);
+  color: #556070;
+  box-shadow: inset 0 0 0 1px rgba(100, 112, 128, 0.14);
+}
+.detailAiSeal.tier-low svg {
+  color: #8a94a6;
+  filter: drop-shadow(0 0 3px rgba(100, 112, 128, 0.4));
+}
+.detailAiSeal.tier-low span {
+  color: #7b8494;
+}
 .detailSection {
   margin-top: 22px;
 }
@@ -5327,4 +5421,66 @@ a.primaryButton {
   .noticeMeta {
     gap: 8px;
   }
+}
+
+/* =====================================================================
+   AI status banner — shows when the backend AI pipeline is degraded
+   (quota exhausted → keyword fallback, or AI disabled). Dismissible.
+   ===================================================================== */
+.aiStatusBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  animation: viewFade var(--dur-slow) var(--ease-out);
+}
+.aiStatusBanner.warn {
+  border-color: #ffe0b0;
+  background: #fff8ec;
+  color: #8a5a00;
+}
+.aiStatusBanner.info {
+  border-color: #d7e3f5;
+  background: #f3f8ff;
+  color: #3a5169;
+}
+.aiStatusIcon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.aiStatusBanner.warn .aiStatusIcon {
+  color: var(--c-warning);
+}
+.aiStatusBanner.info .aiStatusIcon {
+  color: var(--c-primary);
+}
+.aiStatusText {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.aiStatusClose {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  transition:
+    opacity var(--dur) var(--ease-out),
+    background var(--dur) var(--ease-out);
+}
+.aiStatusClose:hover {
+  opacity: 1;
+  background: rgba(15, 23, 42, 0.06);
 }

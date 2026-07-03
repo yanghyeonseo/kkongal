@@ -1,6 +1,6 @@
 import { Sparkles, Bookmark } from "lucide-react";
 import { formatRelativeTime, calculateDday } from "../utils/date.js";
-import { isAiMatched } from "../utils/relevance.js";
+import { isAiMatched, relevanceTier } from "../utils/relevance.js";
 import SourceFavicon from "./SourceFavicon.jsx";
 
 function ddayLabel(dDay) {
@@ -15,6 +15,7 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
   const dLabel = ddayLabel(dDay);
   const aiMatched = isAiMatched(notice);
   const scorePercent = Math.round((Number(notice.relevanceScore) || 0) * 100);
+  const scoreTier = relevanceTier(notice.relevanceScore);
 
   let ddayVariant = "";
   if (dDay !== null) {
@@ -53,10 +54,14 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
         <SourceFavicon
           name={notice.sourceDisplayName}
           faviconUrl={notice.sourceFaviconUrl}
+          siteUrl={notice.url}
           size={46}
         />
         {aiMatched && (
-          <span className="noticeAiMark" title={`AI 매칭 ${scorePercent}%`}>
+          <span
+            className={`noticeAiMark tier-${scoreTier}`}
+            title={`AI 매칭 ${scorePercent}%`}
+          >
             <span className="noticeAiGlow">
               <Sparkles size={15} className="noticeAiSpark" aria-hidden="true" />
             </span>

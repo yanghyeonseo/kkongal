@@ -125,6 +125,7 @@ function SiteCatalog({ isSubscribed, onToggle }) {
               <SourceFavicon
                 name={item.name}
                 faviconUrl={item.faviconUrl}
+                siteUrl={item.url}
                 size={40}
                 rounded="12px"
                 className="catalogLogo"

@@ -3,7 +3,7 @@ import ModalShell from "./ModalShell.jsx";
 import Markdown from "./Markdown.jsx";
 import SourceFavicon from "./SourceFavicon.jsx";
 import { formatDate, calculateDday } from "../utils/date.js";
-import { isAiMatched } from "../utils/relevance.js";
+import { isAiMatched, relevanceTier } from "../utils/relevance.js";
 
 function ddayLabel(dDay) {
   if (dDay === null) return null;
@@ -33,6 +33,7 @@ function NoticeDetailModal({ notice, onClose, onToggleSave }) {
 
   const aiMatched = isAiMatched(notice);
   const scorePercent = Math.round((Number(notice.relevanceScore) || 0) * 100);
+  const scoreTier = relevanceTier(notice.relevanceScore);
   const dDay = calculateDday(notice.deadlineAt);
   const dLabel = ddayLabel(dDay);
   const expired = dDay !== null && dDay < 0;
@@ -74,6 +75,7 @@ function NoticeDetailModal({ notice, onClose, onToggleSave }) {
         <SourceFavicon
           name={notice.sourceDisplayName}
           faviconUrl={notice.sourceFaviconUrl}
+          siteUrl={notice.url}
           size={40}
           rounded="12px"
         />
@@ -97,7 +99,7 @@ function NoticeDetailModal({ notice, onClose, onToggleSave }) {
         </div>
 
         {aiMatched && (
-          <div className="detailAiSeal" title={`AI 매칭 ${scorePercent}%`}>
+          <div className={`detailAiSeal tier-${scoreTier}`} title={`AI 매칭 ${scorePercent}%`}>
             <Sparkles size={15} aria-hidden="true" />
             <b>{scorePercent}%</b>
             <span>AI 매칭</span>
