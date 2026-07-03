@@ -8,9 +8,10 @@
 `notified_at` 은 알림 계층 소유이므로 절대 건드리지 않는다.
 
 AI 가 최종 권위(authoritative)다: 크롤러의 순진한 키워드 매처(crawler/matcher.py)가
-수집 시점에 남기는 플레이스홀더 행(`reason == "Keyword match"`, score 1.0)은 AI 가
-덮어쓴다(override). 반면 이미 AI 로 판정이 끝난 (공지,사용자) 쌍은 비용 절감을 위해
-`reclassify` 없이는 다시 호출하지 않는다(NFR-6).
+남기는 플레이스홀더 행과, LLM 장애 시의 결정론적 키워드 폴백 행은 아직 '확정 전'으로 보고
+LLM 이 살아나면 다시 판정해 덮어쓴다. 반면 이미 LLM 으로 판정이 끝난
+(`classified_by_llm=True`) (공지,사용자) 쌍은 비용 절감을 위해 `reclassify` 없이는 다시
+호출하지 않는다(NFR-6).
 """
 from __future__ import annotations
 
@@ -29,8 +30,9 @@ from .llm import PROVIDER_LLM, LLMClient, get_client
 
 logger = logging.getLogger("ai")
 
-# crawler/matcher.py 가 크롤링 시점에 남기는 '순진한 키워드 매칭' 플레이스홀더의 reason.
-# 이 값을 가진 InboxNotice 행은 아직 AI 판정 전으로 보고 AI 가 덮어쓴다(생략하지 않는다).
+# crawler/matcher.py 가 크롤링 시점에 남기는 '순진한 키워드 매칭' 플레이스홀더의 reason 값.
+# 재판정 여부는 이제 classified_by_llm(순진한 매처·폴백 행은 False → 재판정)로 판단하므로,
+# 이 상수는 표시/참조·테스트용으로만 남긴다.
 NAIVE_REASON = "Keyword match"
 
 # merge 시 합산할 카운터 필드(집계 전용 notices_processed 는 run 단에서 증가)
@@ -111,27 +113,27 @@ def _classify_pair(
     threshold: float,
     reclassify: bool,
     dry_run: bool,
-    existing_reason: Optional[str],
+    existing_classified_by_llm: bool,
     summary: RunSummary,
 ) -> None:
     """(공지, 사용자) 한 쌍을 판정해 ``summary`` 를 갱신한다(inbox upsert).
 
     ``classify_notice`` 와 ``classify_notices_for_user`` 가 공유하는 단일 판정 단위.
     동작 규칙은 ``classify_notice`` 문서와 동일하다:
-    - 이미 'AI' 로 분류된 쌍은 ``reclassify=False`` 면 LLM 호출 없이 생략(NFR-6).
-      순진한 매처('Keyword match') 행은 생략 대상이 아니라 덮어쓰기 대상.
+    - 이미 LLM 으로 분류된 쌍은 ``reclassify=False`` 면 LLM 호출 없이 생략(NFR-6).
+      순진한 매처·폴백 행(``classified_by_llm=False``)은 생략 대상이 아니라 덮어쓰기 대상.
     - 평가한 쌍은 점수와 무관하게 항상 upsert(멱등)하고,
       ``is_recommended = (score >= threshold)`` 를 함께 저장한다(임계값 미만도 삭제하지
       않고 is_recommended=False 로 남긴다).
     - ``notified_at`` 은 절대 건드리지 않는다.
     - 개별 실패는 삼켜서 ``summary.errors`` 로만 집계한다(상위 루프 비중단).
 
-    ``existing_reason`` 은 ``reclassify=False`` 일 때 이 쌍의 기존 InboxNotice.reason
-    (없으면 None). ``reclassify=True`` 면 무시된다.
+    ``existing_classified_by_llm`` 은 ``reclassify=False`` 일 때 이 쌍의 기존 InboxNotice
+    가 LLM 으로 확정됐는지(없으면 False). ``reclassify=True`` 면 무시된다.
     """
 
-    if not reclassify and existing_reason is not None and existing_reason != NAIVE_REASON:
-        # 이미 'AI' 로 분류가 끝난 쌍 → 비용 절약을 위해 LLM 재호출 생략(NFR-6).
+    if not reclassify and existing_classified_by_llm:
+        # 이미 LLM 으로 분류가 끝난 쌍 → 비용 절약을 위해 재호출 생략(NFR-6).
         summary.skipped_existing += 1
         return
 
@@ -194,6 +196,9 @@ def _classify_pair(
                 "matched_keywords": ", ".join(verdict.matched_keywords),
                 "reason": verdict.reason,
                 "is_recommended": is_recommended,
+                # LLM 이 실제로 판정했을 때만 '확정'으로 표시. 폴백이면 False → 다음 실행에서
+                # LLM 이 살아나면 다시 판정한다(폴백 고착 방지).
+                "classified_by_llm": verdict.provider == PROVIDER_LLM,
             },
         )
         if created:
@@ -220,8 +225,8 @@ def classify_notice(
       is_recommended=False 로 남겨 '전체 공지'에 보이게 한다('AI 추천'·알림만 True 사용).
       순진한 매처가 남긴 'Keyword match' 행이 있으면 실제 점수/사유/키워드로 덮어쓴다
       (AI 가 최종 권위).
-    - 이미 'AI' 로 분류된 (공지,사용자) 쌍은 `reclassify=False` 면 LLM 호출 없이 생략
-      (NFR-6). 단, 순진한 'Keyword match' 행은 생략 대상이 아니라 재판정/덮어쓰기 대상.
+    - 이미 LLM 으로 분류된 (공지,사용자) 쌍은 `reclassify=False` 면 LLM 호출 없이 생략
+      (NFR-6). 순진한 매처·폴백 행(classified_by_llm=False)은 재판정/덮어쓰기 대상.
     - `notified_at` 은 절대 건드리지 않는다(알림 계층 소유).
     - 개별 사용자 처리 실패가 전체 실행을 중단시키지 않는다.
     """
@@ -236,20 +241,20 @@ def classify_notice(
         source_id_id=notice.source_id_id
     ).select_related("user_id")
 
-    # (공지,사용자) 쌍은 유니크 → user_id 당 기존 reason 은 최대 1개.
-    # reason 으로 '진짜 AI 판정'(생략 대상)과 순진한 매처 플레이스홀더(덮어쓰기 대상)를 구분.
-    existing_reason_by_user: dict[int, str] = {}
+    # (공지,사용자) 쌍은 유니크 → user_id 당 기존 행은 최대 1개.
+    # classified_by_llm 로 'LLM 확정'(생략 대상)과 순진한 매처·폴백 행(덮어쓰기 대상)을 구분.
+    existing_llm_by_user: dict[int, bool] = {}
     if not reclassify:
-        existing_reason_by_user = dict(
+        existing_llm_by_user = dict(
             InboxNotice.objects.filter(notice_id=notice).values_list(
-                "user_id", "reason"
+                "user_id", "classified_by_llm"
             )
         )
 
     for subscription in subscriptions:
         user = subscription.user_id
-        # 행이 없거나(None) 순진한 매처('Keyword match') 행이면 _classify_pair 가
-        # 계속 진행해 덮어쓴다. 이미 'AI' 로 분류된 쌍이면 생략(NFR-6).
+        # 행이 없거나 순진한 매처·폴백 행(classified_by_llm=False)이면 _classify_pair 가
+        # 계속 진행해 덮어쓴다. 이미 LLM 으로 분류된 쌍이면 생략(NFR-6).
         _classify_pair(
             notice,
             user,
@@ -257,7 +262,7 @@ def classify_notice(
             threshold=threshold,
             reclassify=reclassify,
             dry_run=dry_run,
-            existing_reason=existing_reason_by_user.get(user.id),
+            existing_classified_by_llm=existing_llm_by_user.get(user.id, False),
             summary=summary,
         )
 
@@ -279,11 +284,11 @@ def run_classification(
 ) -> RunSummary:
     """후보 공지들을 순회하며 분류한다.
 
-    기본 후보군(NFR-6): 아직 'AI' 로 분류되지 않은 공지 — 행이 아예 없거나, 순진한
-    매처('Keyword match') 행만 있는 공지. 이렇게 하면 크롤러의 순진한 매칭이 공지를
-    선점(shadow)해 AI 선별을 막던 문제를 없애면서도, 이미 AI 가 끝낸 공지는 재호출하지
-    않는다. `since` 를 주면 해당 시각 이후 생성 공지로 한정하고, `reclassify=True` 면
-    이미 분류된 쌍까지 다시 판정한다.
+    기본 후보군(NFR-6): 아직 LLM 으로 확정되지 않은 공지 — 행이 아예 없거나, 순진한
+    매처·폴백 행만(classified_by_llm=False) 있는 공지. 순진한 매칭이 공지를 선점(shadow)해
+    AI 선별을 막던 문제를 없애고, LLM 장애 중 남은 폴백 행도 LLM 복구 시 다시 판정하되,
+    이미 LLM 이 확정한 공지는 재호출하지 않는다. `since` 를 주면 해당 시각 이후 생성 공지로
+    한정하고, `reclassify=True` 면 이미 분류된 쌍까지 다시 판정한다.
     """
 
     client = client or get_client()
@@ -295,19 +300,11 @@ def run_classification(
     if since is not None:
         notices = notices.filter(created_at__gte=since)
     if not reclassify and since is None:
-        # 'AI' 로 이미 분류가 끝난 공지만 후보에서 제외한다.
-        # = 행이 있으면서 순진한 매처 플레이스홀더('Keyword match') 행이 하나도 없는 공지.
-        # 행이 없거나 순진한 매처 행이 남아 있으면 AI 가 덮어써야 하므로 후보로 남긴다.
-        naive_ids = set(
-            InboxNotice.objects.filter(reason=NAIVE_REASON).values_list(
-                "notice_id", flat=True
-            )
-        )
-        classified_ids = set(
-            InboxNotice.objects.values_list("notice_id", flat=True)
-        )
-        ai_done_ids = classified_ids - naive_ids
-        notices = notices.exclude(id__in=ai_done_ids)
+        # LLM 이 확정한(classified_by_llm=True) 행이 있는 공지만 후보에서 제외한다.
+        # 순진한 매처·폴백 행만 있거나 행이 없는 공지는 LLM 이 살아나면 품질을 끌어올리도록
+        # 후보로 남긴다(폴백 고착 방지). NOT EXISTS 서브쿼리라 전체 id 집합을 메모리에
+        # 올리지 않는다.
+        notices = notices.exclude(inbox_entries__classified_by_llm=True)
     notices = notices.select_related("source_id").order_by("-created_at", "-id")
     if limit is not None:
         notices = notices[:limit]
@@ -367,13 +364,13 @@ def classify_notices_for_user(
     total = RunSummary()
     notices = list(notices)
 
-    # 이 사용자에 한해, 대상 공지들의 기존 판정 사유를 한 번에 읽어 NFR-6 생략에 쓴다.
-    existing_reason_by_notice: dict[int, str] = {}
+    # 이 사용자에 한해, 대상 공지들의 'LLM 확정' 여부를 한 번에 읽어 NFR-6 생략에 쓴다.
+    existing_llm_by_notice: dict[int, bool] = {}
     if not reclassify and notices:
-        existing_reason_by_notice = dict(
+        existing_llm_by_notice = dict(
             InboxNotice.objects.filter(
                 user_id=user, notice_id__in=[n.id for n in notices]
-            ).values_list("notice_id", "reason")
+            ).values_list("notice_id", "classified_by_llm")
         )
 
     for notice in notices:
@@ -384,7 +381,7 @@ def classify_notices_for_user(
             threshold=threshold,
             reclassify=reclassify,
             dry_run=dry_run,
-            existing_reason=existing_reason_by_notice.get(notice.id),
+            existing_classified_by_llm=existing_llm_by_notice.get(notice.id, False),
             summary=total,
         )
         total.notices_processed += 1

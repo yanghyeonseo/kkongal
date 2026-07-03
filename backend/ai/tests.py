@@ -191,22 +191,27 @@ class FallbackPathTests(BaseFixtures):
         )
 
     def test_skips_already_classified(self) -> None:
+        # LLM 으로 확정된 쌍만 생략된다 → LLM 클라이언트로 판정해야 한다.
         # store-all: 매칭 사용자(추천)와 비매칭 사용자(비추천) 둘 다 행이 생성된다.
-        first = classify_notice(self.notice)
+        first = classify_notice(self.notice, client=make_smart_client())
         self.assertEqual(first.created, 2)
 
-        second = classify_notice(self.notice)  # reclassify=False → 기존 쌍 모두 생략
-        self.assertEqual(second.skipped_existing, 2)  # 두 사용자 모두 AI 행 존재 → 생략
+        second = classify_notice(self.notice, client=make_smart_client())  # 기존 LLM 쌍 생략
+        self.assertEqual(second.skipped_existing, 2)  # 두 사용자 모두 LLM 확정 → 생략
         self.assertEqual(second.candidates, 0)  # 재평가 대상 없음
         self.assertEqual(
             InboxNotice.objects.filter(notice_id=self.notice).count(), 2
         )
 
-    def test_run_classification_default_excludes_only_real_ai_notice(self) -> None:
-        # 폴백도 'AI 계층'의 출력이므로 그 행은 진짜 분류로 취급된다(순진한 매처와 구분).
-        run_classification()  # user_match 에 진짜-AI 행 생성
-        # 두 번째 기본 실행은 진짜-AI 분류가 끝난 공지를 후보에서 제외 → 처리 0
-        summary = run_classification()
+    def test_run_classification_reprocesses_fallback_but_skips_llm(self) -> None:
+        # 폴백 행은 아직 '확정 전'이라 다음 실행에서 다시 판정된다(폴백 고착 방지).
+        run_classification()  # 키 없음 → 폴백 행 생성(classified_by_llm=False)
+        again = run_classification()  # 폴백 공지는 후보로 남아 재처리됨
+        self.assertEqual(again.notices_processed, 1)
+
+        # LLM 으로 확정되면 그 공지는 이후 실행에서 후보에서 제외된다.
+        run_classification(client=make_smart_client())
+        summary = run_classification(client=make_smart_client())
         self.assertEqual(summary.notices_processed, 0)
 
 
@@ -366,13 +371,14 @@ class AiAuthoritativeTests(BaseFixtures):
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
     def test_real_ai_row_is_skipped_not_overwritten(self) -> None:
-        # 진짜-AI 행(사유가 'Keyword match' 아님)은 reclassify 없이는 생략된다.
+        # LLM 으로 확정된 행(classified_by_llm=True)은 reclassify 없이는 생략된다.
         InboxNotice.objects.create(
             user_id=self.user_match,
             notice_id=self.notice,
             relevance_score=0.9,
             matched_keywords="채용",
             reason="채용 공고로 판단",
+            classified_by_llm=True,
         )
         summary = classify_notice(self.notice, client=make_smart_client())
         self.assertEqual(summary.skipped_existing, 1)
@@ -556,19 +562,20 @@ class EnrichmentTests(TestCase):
             self.notice.content_markdown, payload["content_markdown"]
         )
         self.assertIsNotNone(self.notice.deadline_at)
+        # 마감일 "2026-03-15" 는 한국(KST) 기준 날짜로 앵커링된다. DB 에는 UTC 로 저장되므로
+        # 로컬(KST)로 변환해 날짜를 확인한다(과거엔 UTC 로 저장돼 하루 어긋나던 문제 수정).
+        local_deadline = timezone.localtime(self.notice.deadline_at)
         self.assertEqual(
-            (
-                self.notice.deadline_at.year,
-                self.notice.deadline_at.month,
-                self.notice.deadline_at.day,
-            ),
+            (local_deadline.year, local_deadline.month, local_deadline.day),
             (2026, 3, 15),
         )
         self.assertTrue(timezone.is_aware(self.notice.deadline_at))
 
     def test_enrich_idempotent_skip_when_already_summarized(self) -> None:
+        # LLM 으로 보강 완료된 공지(enriched_by_llm=True)만 skip 대상이다.
         self.notice.summary = "이미 요약된 공지입니다. 두 번째 문장. 세 번째 문장."
-        self.notice.save(update_fields=["summary"])
+        self.notice.enriched_by_llm = True
+        self.notice.save(update_fields=["summary", "enriched_by_llm"])
 
         # 호출되면 summary 를 바꿔버릴 클라이언트지만, skip 이면 건드리지 않아야 한다.
         client = make_fixed_client(
@@ -653,9 +660,10 @@ class EnrichmentTests(TestCase):
             content="첫 문장입니다. 둘째 문장입니다. 셋째 문장입니다.",
             publisher="학생지원팀",
         )
-        # 첫 공지는 이미 보강됨 → skip 대상(NFR-6)
+        # 첫 공지는 이미 LLM 으로 보강됨 → skip 대상(NFR-6)
         self.notice.summary = "이미 보강됨."
-        self.notice.save(update_fields=["summary"])
+        self.notice.enriched_by_llm = True
+        self.notice.save(update_fields=["summary", "enriched_by_llm"])
 
         payload = {
             "summary": "a. b. c.",
