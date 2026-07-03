@@ -27,6 +27,7 @@ import {
 } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import { getAiStatus } from "./api/aiApi.js";
+import { setUnauthorizedHandler } from "./api/client.js";
 import {
   saveStoredUser,
   clearStoredUser,
@@ -36,6 +37,12 @@ import {
 
 import { useNoticeFilters } from "./hooks/useNoticeFilters.js";
 import { useToast } from "./context/toast.js";
+
+// 동기화 스피너 무한 대기 방지용 가드.
+// SYNC_MAX_MS: 상태와 무관하게 이 시간이 지나면 개별 사이트를 종료로 간주(절대 타임아웃).
+// SYNC_MAX_ERRORS: getSyncStatus 가 이 횟수만큼 연속 실패하면 배치 전체를 포기한다.
+const SYNC_MAX_MS = 90_000;
+const SYNC_MAX_ERRORS = 5;
 
 function App() {
   const toast = useToast();
@@ -64,10 +71,22 @@ function App() {
   const pollActiveRef = useRef(false);
   // 동기화 중이나 상태 맵에서 사라진(만료/프로세스 재시작) 사이트의 연속 미검출 횟수.
   const missingPollsRef = useRef({});
+  // 사이트별 동기화 시작 시각(ms). 절대 타임아웃(SYNC_MAX_MS) 판정에 쓴다.
+  const syncStartedAtRef = useRef({});
+  // getSyncStatus 연속 실패 횟수. SYNC_MAX_ERRORS 넘으면 배치를 포기한다.
+  const syncErrorCountRef = useRef(0);
   const isMountedRef = useRef(true);
+  // 세션 만료 핸들러가 stale closure 없이 최신 로그인 상태/필터를 읽도록 ref 로 미러링한다.
+  const currentUserRef = useRef(null);
 
-  const filters = useNoticeFilters(notices);
+  const filters = useNoticeFilters(notices, interests);
   const { setActiveSourceIds } = filters;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   // dismissedReason: 세션 내에서 사용자가 배너를 닫은 사유. 상태가 정상으로 돌아갔다가
   // 다시 저하되면(아래 effect 가 초기화) 배너를 다시 노출한다.
@@ -150,6 +169,8 @@ function App() {
     }
     pollActiveRef.current = false;
     missingPollsRef.current = {};
+    syncStartedAtRef.current = {};
+    syncErrorCountRef.current = 0;
   }, []);
 
   // 한 폴링 주기: 상태 맵을 받아 done/failed 로 끝난 사이트마다 토스트를 띄우고
@@ -163,15 +184,33 @@ function App() {
     let jobs;
     try {
       jobs = await getSyncStatus();
+      syncErrorCountRef.current = 0; // 성공하면 연속 실패 카운터 초기화
     } catch {
-      return; // 일시적 실패는 다음 주기에 재시도
+      // getSyncStatus 가 계속 던지면(네트워크/서버 장애) 카운터만 올라가고 아무 것도
+      // 끝나지 않아 스피너가 영원히 남는다. 임계치를 넘으면 배치를 통째로 포기한다.
+      syncErrorCountRef.current += 1;
+      if (syncErrorCountRef.current >= SYNC_MAX_ERRORS && isMountedRef.current) {
+        toast.info("동기화 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        setSyncingSourceIds([]);
+        stopPolling();
+      }
+      return; // 그 전까지는 다음 주기에 재시도
     }
     if (!isMountedRef.current) return;
 
     const counts = missingPollsRef.current;
+    const startedAt = syncStartedAtRef.current;
+    const now = Date.now();
     const completed = []; // { id, job } — done/failed 로 끝난 사이트
-    const timedOut = []; // id — 상태 엔트리가 사라져(만료 등) 종료로 간주
+    const timedOut = []; // id — 상태 확인 불가/시간 초과로 종료로 간주
     for (const id of syncingIdsRef.current) {
+      // 절대 타임아웃: 상태(running 등)와 무관하게 시작 후 SYNC_MAX_MS 지나면 종료로 본다.
+      // 백엔드 job 이 running 에 멈춰 있어도 스피너가 영원히 남지 않게 하는 최종 안전장치.
+      if (startedAt[id] && now - startedAt[id] >= SYNC_MAX_MS) {
+        timedOut.push(id);
+        delete counts[id];
+        continue;
+      }
       const job = jobs[id];
       if (job && (job.status === "done" || job.status === "failed")) {
         completed.push({ id, job });
@@ -211,9 +250,11 @@ function App() {
       ...completed.map(({ id }) => id),
       ...timedOut,
     ]);
+    finishedIds.forEach((id) => delete startedAt[id]); // 시작 시각 정리
     setSyncingSourceIds((prev) => prev.filter((id) => !finishedIds.has(id)));
 
-    if (completed.length > 0) {
+    // 완료뿐 아니라 강제 종료(timedOut) 시에도 그 사이 반영됐을 수 있는 인박스를 한 번 새로고침.
+    if (completed.length > 0 || timedOut.length > 0) {
       try {
         setNotices(await getMyInboxNotices());
       } catch {
@@ -236,6 +277,26 @@ function App() {
       stopPolling();
     };
   }, [stopPolling]);
+
+  // 세션 만료(access 토큰 만료 + refresh 재발급 실패) 시 client 가 이 핸들러를 호출한다.
+  // 로그인 상태였을 때만 반응 — 최초 미인증 하이드레이트의 401 은 조용히 무시한다.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      if (!currentUserRef.current) return;
+      currentUserRef.current = null; // 병렬 요청이 동시에 401 나도 한 번만 처리
+      clearStoredUser();
+      setCurrentUser(null);
+      setNotices([]);
+      setSources([]);
+      setInterests([]);
+      setSyncingSourceIds([]);
+      stopPolling();
+      filtersRef.current.resetForSignedOut();
+      setAiStatus({ degraded: false, reason: "ok", message: "" });
+      toast.info("세션이 만료됐어요. 다시 로그인해주세요.");
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [toast, stopPolling]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -309,6 +370,7 @@ function App() {
         }
         return;
       }
+      syncStartedAtRef.current[sourceId] = Date.now(); // 절대 타임아웃 기준 시각 기록
       setSyncingSourceIds((prev) =>
         prev.includes(sourceId) ? prev : [...prev, sourceId],
       );
@@ -338,6 +400,10 @@ function App() {
       toast.info("동기화할 수 있는 사이트가 없어요.");
       return;
     }
+    const startedAt = Date.now();
+    enqueued.forEach((id) => {
+      syncStartedAtRef.current[id] = startedAt; // 절대 타임아웃 기준 시각 기록
+    });
     setSyncingSourceIds((prev) => {
       const next = new Set(prev);
       enqueued.forEach((id) => next.add(id));

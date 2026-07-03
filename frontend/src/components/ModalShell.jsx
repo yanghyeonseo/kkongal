@@ -109,11 +109,15 @@ function ModalShell({
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
 
+    // Tab 을 이 트랩에서 처리하면 부모 모달(중첩 시)의 트랩으로 전파되지 않게 막는다.
+    // 전파되면 부모 핸들러가 다시 포커스를 옮겨 경계에서 포커스가 튄다(Escape 처리와 동일).
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
+      event.stopPropagation();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
       event.preventDefault();
+      event.stopPropagation();
       first.focus();
     }
   };
