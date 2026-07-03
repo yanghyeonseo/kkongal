@@ -233,8 +233,17 @@ _worker_thread: threading.Thread | None = None
 def enqueue(user, source) -> None:
     """(user, source) 동기화 작업을 큐에 넣고 워커가 돌고 있도록 보장한다.
 
-    호출 즉시 상태를 'running' 으로 세워, 폴링이 곧바로 진행 중임을 볼 수 있게 한다.
+    호출 즉시 상태를 'running' 으로 세워 폴링이 곧바로 진행 중임을 볼 수 있게 한다.
+    이미 'running' 인 작업이 있으면 중복 등록하지 않는다 — 동기화 연타/재요청이 큐를
+    부풀리거나 같은 작업을 반복 처리하지 않도록, 진행 중인 작업으로 붕괴시킨다.
     """
+    try:
+        existing = cache.get(_status_key(user.id, source.id))
+    except Exception:  # noqa: BLE001 - 캐시 조회 실패 시엔 그냥 등록으로 진행
+        existing = None
+    if existing and existing.get("status") == "running":
+        return
+
     _set_status(user.id, source.id, "running")
     _job_queue.put((user.id, source.id))
     _ensure_worker()

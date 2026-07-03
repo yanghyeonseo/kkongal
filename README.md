@@ -51,13 +51,13 @@ flowchart LR
 
 **파이프라인**: `crawl(수집) → enrich(공지당 1회 보강) → classify(사용자별 선별) → dispatch(알림 발송)`.
 
-| 영역 | 사용 기술 |
-| --- | --- |
-| Frontend | React 19, Vite, JavaScript(JSX), lucide-react |
-| Backend | Python 3.12, Django 6, Django REST Framework, SQLite |
-| Crawler | httpx, BeautifulSoup(lxml), pydantic — 정적 HTML |
-| AI | OpenAI 호환 LLM 3단 캐스케이드 (1차 Gemini Flash‑Lite → 2차 Gemma → 결정론적 폴백) |
-| Alert | 이메일(SMTP), 슬랙(Incoming Webhook) |
+| 영역     | 사용 기술                                                                          |
+| -------- | ---------------------------------------------------------------------------------- |
+| Frontend | React 19, Vite, JavaScript(JSX), lucide-react                                      |
+| Backend  | Python 3.12, Django 6, Django REST Framework, SQLite                               |
+| Crawler  | httpx, BeautifulSoup(lxml), pydantic — 정적 HTML                                   |
+| AI       | OpenAI 호환 LLM 3단 캐스케이드 (1차 Gemini Flash‑Lite → 2차 Gemma → 결정론적 폴백) |
+| Alert    | 이메일(SMTP), 슬랙(Incoming Webhook)                                               |
 
 ```
 kkongal/
@@ -136,9 +136,9 @@ npm run dev                          # http://localhost:3000 (→ /api 는 백�
 
 ## 팀
 
-| 이름   | GitHub                                           | 역할                                       |
-| ------ | ------------------------------------------------ | ------------------------------------------ |
-| 양현서 | [@yanghyeonseo](https://github.com/yanghyeonseo) | AI 선별·알림 기능 / 프론트·백엔드 지원     |
-| 서지안 | [@Seo-Jian](https://github.com/Seo-Jian)         | 프론트엔드 (대시보드·사이트 등록 UI)       |
-| 윤지후 | [@jeehooy2](https://github.com/jeehooy2)         | 백엔드 (크롤링·수집 파이프라인, 서버 로직) |
-| 배진규 | [@r2rboss1](https://github.com/r2rboss1)         | 백엔드 (크롤링·수집 파이프라인, 서버 로직) |
+| 이름             | GitHub                                           | 역할                                          |
+| ---------------- | ------------------------------------------------ | --------------------------------------------- |
+| **양현서**(팀장) | [@yanghyeonseo](https://github.com/yanghyeonseo) | 기획 / AI 선별·알림 기능 / 프론트·백엔드 지원 |
+| **서지안**       | [@Seo-Jian](https://github.com/Seo-Jian)         | 프론트엔드 (대시보드·사이트 등록 UI)          |
+| **윤지후**       | [@jeehooy2](https://github.com/jeehooy2)         | 백엔드 (크롤링·수집 파이프라인, 서버 로직)    |
+| **배진규**       | [@r2rboss1](https://github.com/r2rboss1)         | 백엔드 (크롤링·수집 파이프라인, 서버 로직)    |

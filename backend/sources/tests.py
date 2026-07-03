@@ -673,6 +673,27 @@ class SyncJobsWorkerTests(TestCase):
         self.assertEqual(done[self.source.id]["inbox_added"], 3)
         self.assertEqual(done[self.source.id]["message"], "완료")
 
+    def test_enqueue_dedups_while_running(self) -> None:
+        # 이미 'running' 인 (user, source) 는 연타/재요청해도 큐에 중복으로 쌓이지 않는다.
+        with patch.object(sync_jobs, "_ensure_worker"):
+            sync_jobs.enqueue(self.user, self.source)
+            sync_jobs.enqueue(self.user, self.source)
+            sync_jobs.enqueue(self.user, self.source)
+        self.assertEqual(sync_jobs._job_queue.qsize(), 1)
+
+        # 진행 중 작업이 끝나면(→ 'done') 다시 enqueue 가 허용된다.
+        with patch("django.db.connection.close"), patch.object(
+            sync_jobs,
+            "run_sync_for_source",
+            return_value={"inbox_added": 0, "message": "완료"},
+        ):
+            self.assertTrue(sync_jobs._process_one(timeout=1))
+        self.assertEqual(sync_jobs._job_queue.qsize(), 0)
+
+        with patch.object(sync_jobs, "_ensure_worker"):
+            sync_jobs.enqueue(self.user, self.source)
+        self.assertEqual(sync_jobs._job_queue.qsize(), 1)
+
 
 @override_settings(
     LLM_API_KEY="",

@@ -62,6 +62,8 @@ function App() {
   const sourcesRef = useRef([]);
   const pollTimerRef = useRef(null);
   const pollActiveRef = useRef(false);
+  // 동기화 중이나 상태 맵에서 사라진(만료/프로세스 재시작) 사이트의 연속 미검출 횟수.
+  const missingPollsRef = useRef({});
   const isMountedRef = useRef(true);
 
   const filters = useNoticeFilters(notices);
@@ -147,6 +149,7 @@ function App() {
       pollTimerRef.current = null;
     }
     pollActiveRef.current = false;
+    missingPollsRef.current = {};
   }, []);
 
   // 한 폴링 주기: 상태 맵을 받아 done/failed 로 끝난 사이트마다 토스트를 띄우고
@@ -165,34 +168,59 @@ function App() {
     }
     if (!isMountedRef.current) return;
 
-    const completed = syncingIdsRef.current
-      .map((id) => ({ id, job: jobs[id] }))
-      .filter(
-        ({ job }) => job && (job.status === "done" || job.status === "failed"),
-      );
-    if (completed.length === 0) return;
+    const counts = missingPollsRef.current;
+    const completed = []; // { id, job } — done/failed 로 끝난 사이트
+    const timedOut = []; // id — 상태 엔트리가 사라져(만료 등) 종료로 간주
+    for (const id of syncingIdsRef.current) {
+      const job = jobs[id];
+      if (job && (job.status === "done" || job.status === "failed")) {
+        completed.push({ id, job });
+        delete counts[id];
+      } else if (job) {
+        counts[id] = 0; // 아직 running
+      } else {
+        // 상태 엔트리 없음(TTL 만료/프로세스 재시작). 두 주기 연속이면 종료로 처리해
+        // 스피너·폴링이 무한정 남지 않게 한다.
+        counts[id] = (counts[id] || 0) + 1;
+        if (counts[id] >= 2) {
+          timedOut.push(id);
+          delete counts[id];
+        }
+      }
+    }
+    if (completed.length === 0 && timedOut.length === 0) return;
 
-    for (const { id, job } of completed) {
+    const nameOf = (id) => {
       const site = sourcesRef.current.find((source) => source.id === id);
-      const siteName = site?.displayName || site?.name || "사이트";
+      return site?.displayName || site?.name || "사이트";
+    };
+    for (const { id, job } of completed) {
       if (job.status === "done") {
         const detail =
           job.inboxAdded > 0 ? `${job.inboxAdded}건 새로 추천` : "새 공지 없음";
-        toast.success(`${siteName} 동기화 완료 · ${detail}`);
+        toast.success(`${nameOf(id)} 동기화 완료 · ${detail}`);
       } else {
-        toast.error(job.message || `${siteName} 동기화 실패`);
+        toast.error(job.message || `${nameOf(id)} 동기화 실패`);
       }
     }
-
-    const completedIds = new Set(completed.map(({ id }) => id));
-    setSyncingSourceIds((prev) => prev.filter((id) => !completedIds.has(id)));
-
-    try {
-      setNotices(await getMyInboxNotices());
-    } catch {
-      // 인박스 새로고침 실패는 조용히 무시
+    for (const id of timedOut) {
+      toast.info(`${nameOf(id)} 동기화 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.`);
     }
-    refreshAiStatus();
+
+    const finishedIds = new Set([
+      ...completed.map(({ id }) => id),
+      ...timedOut,
+    ]);
+    setSyncingSourceIds((prev) => prev.filter((id) => !finishedIds.has(id)));
+
+    if (completed.length > 0) {
+      try {
+        setNotices(await getMyInboxNotices());
+      } catch {
+        // 인박스 새로고침 실패는 조용히 무시
+      }
+      refreshAiStatus();
+    }
   }, [toast, refreshAiStatus, stopPolling]);
 
   const ensurePolling = useCallback(() => {
