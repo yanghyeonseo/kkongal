@@ -56,6 +56,7 @@ function NoticeCard({ notice, onOpenNotice, onToggleSave }) {
           faviconUrl={notice.sourceFaviconUrl}
           siteUrl={notice.url}
           size={46}
+          rounded="14px"
         />
         {aiMatched && (
           <span

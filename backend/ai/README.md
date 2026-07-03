@@ -2,7 +2,7 @@
 
 ## 개요
 
-`ai` 는 수집된 공지를 사용자에게 맞게 걸러내는 두 단계를 담당한다. **보강(enrich)** 은 공지당 1회, 사용자와 무관하게 LLM 을 호출해 3문장 요약·정리된 markdown·마감일을 채운다. **선별(classify)** 은 그 공지를 출처를 구독한 각 사용자의 관심 조건·프로필과 대조해 관련도(0~1)·매칭 키워드·선별 사유를 산출하고, 임계값 이상만 개인 피드(`InboxNotice`)로 편입한다. 선별은 단순 키워드 표면 일치가 아니라 LLM 이 문맥·의미로 판단한다.
+`ai` 는 수집된 공지를 사용자에게 맞게 걸러내는 두 단계를 담당한다. **보강(enrich)** 은 공지당 1회, 사용자와 무관하게 LLM 을 호출해 3문장 요약·정리된 markdown·마감일을 채운다. **선별(classify)** 은 그 공지를 출처를 구독한 각 사용자의 관심 조건·프로필과 대조해 관련도(0~1)·매칭 키워드·선별 사유를 산출하며, 모든 쌍을 `InboxNotice` 에 저장하되 `is_recommended` 플래그로 임계값 판정(관련도 >= threshold = true, 미만 = false)을 기록한다. 대시보드의 'AI 추천' 탭과 알림은 `is_recommended=true` 행만 대상으로 한다. 선별은 단순 키워드 표면 일치가 아니라 LLM 이 문맥·의미로 판단한다.
 
 LLM 클라이언트는 **제공자 비종속(OpenAI 호환)** 이다. 기본값은 가성비가 좋은 Google Gemini(`gemini-2.5-flash-lite`, 무료 티어 존재)이며 `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` 세 값만 바꾸면 OpenAI·DeepSeek·Groq 등으로 교체된다. **키가 없거나 호출이 실패하면 예외를 던지지 않고 결정론적 키워드 매칭으로 폴백**하므로 오프라인/CI/데모에서도 파이프라인이 그대로 돈다. 이 앱은 HTTP 왕복 없이 Django ORM 을 직접 쓰며(관리 명령·서비스 함수), 유일한 HTTP 노출은 프론트 배너용 상태 조회다.
 
@@ -32,7 +32,7 @@ python manage.py classify_notices --reclassify     # 이미 분류된 쌍도 재
 python manage.py classify_notices --dry-run        # 쓰지 않고 집계만
 ```
 
-선별은 임계값(`LLM_RELEVANCE_THRESHOLD`, 기본 0.5) 이상이면 `InboxNotice` 를 upsert(멱등)하고, 미만이면 기존 행을 삭제(다운그레이드)해 오래된 높은 점수를 남기지 않는다. 사이트별 "동기화" 버튼은 이 명령 대신 `classify_notices_for_user` 를 직접 불러 요청 사용자·소수 공지만 처리한다(→ `sources` 앱).
+선별은 모든 `(공지,사용자)` 쌍을 `InboxNotice` upsert(멱등)하되, 임계값(`LLM_RELEVANCE_THRESHOLD`, 기본 0.5) 판정에 따라 `is_recommended` 를 설정한다(이상 = true, 미만 = false). 사이트별 "동기화" 버튼은 이 명령 대신 `classify_notices_for_user` 를 직접 불러 요청 사용자·소수 공지만 처리한다(→ `sources` 앱).
 
 이 앱은 관리 명령/서비스 함수로 동작하며, 외부에 노출하는 HTTP 엔드포인트는 `GET /api/ai/status/`(프론트 배너용, `notices` 앱이 라우팅) 하나뿐이다.
 

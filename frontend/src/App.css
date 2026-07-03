@@ -3387,14 +3387,14 @@ button:disabled {
   background: #f5faff;
 }
 .catalogLogo {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 9px;
   color: #fff;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 800;
 }
 .catalogInfo {

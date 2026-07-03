@@ -8,7 +8,6 @@ function Sidebar({
   onChangeView,
   onOpenSiteRegister,
   aiCount,
-  savedCount,
   activeSourceIds,
   onToggleSource,
   syncingSourceIds = [],
@@ -57,7 +56,7 @@ function Sidebar({
   const MENU = [
     { id: "all", label: "전체", Icon: Globe, badge: null },
     { id: "ai", label: "AI 추천", Icon: Sparkles, badge: aiCount },
-    { id: "saved", label: "저장됨", Icon: Bookmark, badge: savedCount },
+    { id: "saved", label: "저장됨", Icon: Bookmark, badge: null },
   ];
 
   return (

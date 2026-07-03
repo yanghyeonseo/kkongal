@@ -368,30 +368,40 @@ class LLMClient:
         *,
         note: str = "",
     ) -> Verdict:
-        """키 없음/호출 실패 시의 결정론적 키워드 매칭.
+        """키 없음/호출 실패 시(degraded/quota)의 결정론적 매칭.
 
-        제목+본문에 대해 관심 키워드를 대소문자 무시 부분일치로 찾고, 매칭 개수
-        비율로 점수를 낸다. 하나라도 매칭되면 기본 임계값(0.5)을 넘도록 설계했다.
+        제목+본문에 대해 각 관심 조건의 ``keyword`` 뿐 아니라 ``description`` 의
+        단어 토큰(길이 2 이상)까지 대소문자 무시 부분일치로 찾는다. 이렇게 하면
+        '개발', 'AI research' 같은 자연어 관심사도 폴백(키워드 미설정)에서 매칭되어
+        선별 품질이 오른다. 하나라도 매칭되면 기본 임계값(0.5)을 넘도록 설계했다.
+        어떤 입력에도 예외를 던지지 않는다(방어적).
         """
 
         haystack = f"{title or ''}\n{content or ''}".lower()
-        keyworded = [
-            (interest.get("keyword") or "").strip()
-            for interest in interests
-            if (interest.get("keyword") or "").strip()
-        ]
-        matched: list[str] = []
-        for keyword in keyworded:
-            if keyword.lower() in haystack and keyword not in matched:
-                matched.append(keyword)
+
+        # 각 관심 조건에서 keyword + description 토큰을 뽑아 대소문자 무시로 중복 제거.
+        terms: list[str] = []
+        seen: set[str] = set()
+        for interest in interests:
+            candidates = [str(interest.get("keyword") or "").strip()]
+            description = str(interest.get("description") or "")
+            candidates.extend(tok for tok in description.split() if len(tok) >= 2)
+            for term in candidates:
+                term = term.strip()
+                low = term.lower()
+                if term and low not in seen:
+                    seen.add(low)
+                    terms.append(term)
+
+        matched = [term for term in terms if term.lower() in haystack]
 
         if matched:
-            fraction = len(matched) / max(len(keyworded), 1)
+            fraction = len(matched) / max(len(terms), 1)
             score = round(min(1.0, 0.5 + 0.5 * fraction), 3)
-            reason = "관심 키워드와 일치: " + ", ".join(matched)
+            reason = "관심 키워드·설명과 일치: " + ", ".join(matched)
         else:
             score = 0.0
-            reason = "관심 키워드와 일치하는 내용 없음"
+            reason = "관심 키워드·설명과 일치하는 내용 없음"
         # note(예: 'LLM 호출 실패')는 내부 디버깅용 — 사용자에게 보이는 reason 에는 넣지 않는다.
         if note:
             logger.debug("fallback reason note: %s", note)

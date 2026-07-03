@@ -201,8 +201,8 @@ function OnboardingWizard({ user, onComplete }) {
       <div className="onbCard">
         <div className="onbHead">
           <div className="lpBrand">
-            <img src={logo} className="brandMark" style={{ width: 30, height: 30 }} alt="꽁알" />
-            <strong>꽁알 시작하기</strong>
+            <img src={logo} className="brandMark" style={{ width: 30, height: 30 }} alt="꽁알꽁알" />
+            <strong>꽁알꽁알 시작하기</strong>
           </div>
           <button
             type="button"

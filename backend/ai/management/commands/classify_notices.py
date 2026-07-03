@@ -73,8 +73,9 @@ class Command(BaseCommand):
             f"분류 시도(공지×사용자): {summary.candidates}",
             f"inbox 생성: {summary.created}",
             f"inbox 갱신: {summary.updated}",
-            f"임계값 미만 제외: {summary.below_threshold}",
-            f"다운그레이드 삭제: {summary.downgraded}",
+            f"AI 추천(is_recommended): {summary.recommended}",
+            f"임계값 미만 저장(비추천): {summary.below_threshold}",
+            f"추천→비추천 전환: {summary.downgraded}",
             f"기존 분류 생략: {summary.skipped_existing}",
             f"오류: {summary.errors}",
             f"판정 경로: {summary.provider} "

@@ -72,8 +72,8 @@ function Landing({ onOpenAuth }) {
     <div className={`landing ${scrolled ? "scrolled" : ""}`} ref={rootRef}>
       <nav className="landingNav">
         <div className="lpBrand">
-          <img src={logo} className="brandMark" alt="꽁알" />
-          <strong>꽁알</strong>
+          <img src={logo} className="brandMark" alt="꽁알꽁알" />
+          <strong>꽁알꽁알</strong>
         </div>
         <div className="landingNavActions">
           <button className="lpBtnGhost" onClick={() => onOpenAuth("login")}>
@@ -97,7 +97,7 @@ function Landing({ onOpenAuth }) {
           </h1>
           <p className="heroSub">
             학교·채용·장학·공모전 사이트를 매번 들여다볼 필요 없어요. 관심사만
-            알려주면 꽁알이 새 공지를 선별해 이메일·슬랙으로 바로 보내드려요.
+            알려주면 꽁알꽁알이 새 공지를 선별해 이메일·슬랙으로 바로 보내드려요.
           </p>
           <div className="heroCtas">
             <button
@@ -203,7 +203,7 @@ function Landing({ onOpenAuth }) {
         <div className="sectionHead">
           <span className="sectionKicker">HOW IT WORKS</span>
           <h2>이렇게 동작해요</h2>
-          <p>설정은 2분이면 충분해요. 그다음은 꽁알이 알아서 챙겨드려요.</p>
+          <p>설정은 2분이면 충분해요. 그다음은 꽁알꽁알이 알아서 챙겨드려요.</p>
         </div>
         <ol className="howSteps">
           {HOW_STEPS.map(({ Icon, title, body }) => (
@@ -220,7 +220,7 @@ function Landing({ onOpenAuth }) {
 
       <section className="landingSection">
         <div className="sectionHead">
-          <span className="sectionKicker">WHY 꽁알</span>
+          <span className="sectionKicker">WHY 꽁알꽁알</span>
           <h2>공지 하나 놓치지 않도록</h2>
           <p>필요한 건 다 있고, 번거로운 건 전부 자동이에요.</p>
         </div>
@@ -250,8 +250,8 @@ function Landing({ onOpenAuth }) {
 
       <footer className="landingFooter">
         <div className="lpBrand">
-          <img src={logo} className="brandMark" style={{ width: 28, height: 28 }} alt="꽁알" />
-          <strong>꽁알</strong>
+          <img src={logo} className="brandMark" style={{ width: 28, height: 28 }} alt="꽁알꽁알" />
+          <strong>꽁알꽁알</strong>
         </div>
         <span>관심사 기반 공지 큐레이션 · AI가 골라주는 맞춤 알림</span>
       </footer>

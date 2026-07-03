@@ -49,6 +49,7 @@ class InboxFixtures(TestCase):
             user_id=self.user,
             notice_id=self.notice_saved,
             relevance_score=0.9,
+            is_recommended=True,
             matched_keywords="채용",
             reason="채용 공고로 판단",
             is_saved=True,
@@ -56,7 +57,8 @@ class InboxFixtures(TestCase):
         self.inbox_unsaved = InboxNotice.objects.create(
             user_id=self.user,
             notice_id=self.notice_unsaved,
-            relevance_score=0.7,
+            relevance_score=0.3,
+            is_recommended=False,
             reason="관련 있음",
             is_saved=False,
         )
@@ -97,7 +99,7 @@ class InboxListTests(InboxFixtures):
 
         row = next(r for r in response.data if r["id"] == self.inbox_saved.id)
         for key in (
-            "id", "notice_id", "notice", "relevance_score",
+            "id", "notice_id", "notice", "relevance_score", "is_recommended",
             "matched_keywords", "reason", "is_read", "is_saved",
         ):
             self.assertIn(key, row)
@@ -122,6 +124,35 @@ class InboxListTests(InboxFixtures):
     def test_saved_filter_invalid_value_is_rejected(self) -> None:
         self.client.force_authenticate(user=self.user)
         response = self.client.get(INBOX_URL, {"saved": "maybe"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_recommended_filter_true_returns_only_recommended(self) -> None:
+        # 'AI 추천' 탭: is_recommended=True 행만.
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(INBOX_URL, {"recommended": "true"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in response.data}
+        self.assertEqual(ids, {self.inbox_saved.id})
+
+    def test_recommended_filter_false_returns_only_not_recommended(self) -> None:
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(INBOX_URL, {"recommended": "false"})
+
+        ids = {row["id"] for row in response.data}
+        self.assertEqual(ids, {self.inbox_unsaved.id})
+
+    def test_no_recommended_filter_returns_all_rows(self) -> None:
+        # '전체 공지' 탭: 추천/비추천 무관 모든 행.
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(INBOX_URL)
+
+        ids = {row["id"] for row in response.data}
+        self.assertEqual(ids, {self.inbox_saved.id, self.inbox_unsaved.id})
+
+    def test_recommended_filter_invalid_value_is_rejected(self) -> None:
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(INBOX_URL, {"recommended": "maybe"})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 

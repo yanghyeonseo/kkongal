@@ -1,13 +1,9 @@
 // 백엔드 inbox 편입 임계값(0.5)보다 높게 잡아 "강한 추천"만 강조한다.
 const AI_HIGH_RELEVANCE = 0.8;
 
-// 높은 관련도이거나 매칭된 관심 태그가 있으면 AI 매치로 본다.
+// AI 매치 여부는 백엔드가 계산한 is_recommended 를 그대로 따른다(임계값 로직은 백엔드 소유).
 export function isAiMatched(notice) {
-  if (!notice) return false;
-  return (
-    notice.relevanceScore >= AI_HIGH_RELEVANCE ||
-    (notice.matchedInterestTags && notice.matchedInterestTags.length > 0)
-  );
+  return !!(notice && notice.isRecommended);
 }
 
 // 관련도 구간(색상 tier 구분용).

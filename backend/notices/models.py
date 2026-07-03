@@ -51,6 +51,10 @@ class InboxNotice(models.Model):
         related_name="inbox_entries",
     )
     relevance_score = models.FloatField(default=0.0)
+    # AI 선별이 임계값(settings.LLM_RELEVANCE_THRESHOLD) 이상으로 판정했는지.
+    # 대시보드 '전체 공지'는 모든 행을, 'AI 추천' 탭과 모든 알림은 이 값이 True 인
+    # 행만 사용한다. 분류 시 relevance_score >= threshold 로 계산해 저장한다.
+    is_recommended = models.BooleanField(default=False)
     matched_keywords = models.TextField(blank=True)
     reason = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
@@ -69,6 +73,7 @@ class InboxNotice(models.Model):
         indexes = [
             models.Index(fields=["user_id", "created_at"]),
             models.Index(fields=["user_id", "is_read"]),
+            models.Index(fields=["user_id", "is_recommended"]),
             models.Index(fields=["notified_at"]),
         ]
 

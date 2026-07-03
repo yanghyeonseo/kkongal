@@ -86,6 +86,7 @@ function normalizeInboxNotice(item) {
 
     isRead: item.is_read ?? false,
     isSaved: item.is_saved ?? false,
+    isRecommended: item.is_recommended ?? false,
     // 마감 상태는 deadline_at 기준으로 계산: 임박(0~7일) / 지남(음수).
     isDeadlineSoon: daysLeft !== null && daysLeft >= 0 && daysLeft <= 7,
     isExpired: daysLeft !== null && daysLeft < 0,

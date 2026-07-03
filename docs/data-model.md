@@ -87,10 +87,11 @@
 | reason | text | 선별 사유(자연어) |
 | is_read | boolean | 읽음 여부 |
 | is_saved | boolean | 저장 여부 |
+| is_recommended | boolean | 관련도 임계값 통과 여부. 'AI 추천' 탭·알림은 이 값이 true 인 행만 대상 |
 | notified_at | datetime | 알림 발송 시각(null=미발송, 중복 방지 기준) |
 | created_at | datetime | 선별 시각 |
 
-> `(user_id, notice_id)` 유니크. 초기 스펙 대비 `is_saved`(저장 기능)가 추가됐다. `notified_at` 은 알림 계층만 갱신한다.
+> `(user_id, notice_id)` 유니크. 초기 스펙 대비 `is_saved`(저장 기능)가 추가됐다. `notified_at` 은 알림 계층만 갱신한다. `is_recommended` 는 AI 선별 시 임계값 판정(`relevance_score >= LLM_RELEVANCE_THRESHOLD`)에 따라 설정하며, 모든 선별 행이 저장되되(→ '전체 공지' 열람), 추천 피드와 알림은 true 인 행만 대상으로 한다.
 
 ### alert_alertchannel — 알림 채널 (`alert.AlertChannel`)
 | 필드 | 타입 | 비고 |
@@ -133,9 +134,9 @@
 1. 사용자가 소스 구독(`source_subscription`)과 관심 조건(`interests`)을 등록한다.
 2. 스케줄러가 `crawl_interval_minutes` 주기로 due 사이트를 크롤링 → 신규 공지를 `notices` 에 적재한다(`(source_id, url)` 동일성).
 3. 신규 공지를 공지당 1회 **보강(enrich)** 해 `summary`/`content_markdown`/`deadline_at` 을 채운다.
-4. 신규/미분류 공지에 대해, 그 소스를 구독한 각 사용자의 `interests` 와 LLM 으로 **선별(classify)** → 임계값 이상이면 `inbox_notice` upsert(score·keywords·reason), 미만이면 기존 행 삭제.
-5. `notified_at` 이 null 인 `inbox_notice` 를 사용자의 활성 `alert_channels`(이메일/슬랙)로 발송 → `notified_at` 갱신, `alert_logs` 기록.
-6. 대시보드는 사용자의 `inbox_notice` 를 출처·점수·기간으로 조회/정렬해 표시한다.
+4. 신규/미분류 공지에 대해, 그 소스를 구독한 각 사용자의 `interests` 와 LLM 으로 **선별(classify)** → `(공지,사용자)` 쌍마다 `inbox_notice` upsert(score·keywords·reason·is_recommended). 점수와 무관하게 저장하되 임계값 이상이면 `is_recommended=true`(미만이면 false). '전체 공지'는 모든 행, 'AI 추천'은 true 인 행.
+5. `notified_at` 이 null 이고 `is_recommended=true` 인 `inbox_notice` 를 사용자의 활성 `alert_channels`(이메일/슬랙)로 발송 → `notified_at` 갱신, `alert_logs` 기록.
+6. 대시보드는 사용자의 `inbox_notice` 를 출처·점수·기간으로 조회/정렬해 표시하며, 탭을 통해 '전체 공지'(모든 행) 및 'AI 추천'(is_recommended=true 만) 을 구분해 보여준다.
 
 ---
 
@@ -145,7 +146,7 @@
 - `sources_noticesource.url` UNIQUE
 - `sources_sourcesubscription` UNIQUE `(user_id, source_id)`
 - `notices_notice` UNIQUE `(source_id, url)`
-- `notices_inboxnotice` UNIQUE `(user_id, notice_id)`, INDEX `(user_id, created_at)`·`(user_id, is_read)`·`(notified_at)`
+- `notices_inboxnotice` UNIQUE `(user_id, notice_id)`, INDEX `(user_id, created_at)`·`(user_id, is_read)`·`(user_id, is_recommended)`·`(notified_at)`
 - `alert_alertchannel` INDEX `(user_id, type)`
 - `alert_alertlog` INDEX `(status)`·`(sent_at)`
 
@@ -222,6 +223,7 @@ erDiagram
         text reason
         boolean is_read
         boolean is_saved
+        boolean is_recommended
         datetime notified_at
         datetime created_at
     }

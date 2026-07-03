@@ -2,8 +2,10 @@
 
 파이프라인상 위치: crawl_notices → **classify_notices** → dispatch_alerts.
 수집된 Notice 를, 그 출처를 구독한 사용자들의 관심 조건과 대조(LLM 또는 폴백)하여
-임계값 이상이면 InboxNotice 로 upsert 한다. `notified_at` 은 알림 계층 소유이므로
-절대 건드리지 않는다.
+평가한 모든 (공지,사용자) 쌍을 InboxNotice 로 저장하고, 점수와 함께
+`is_recommended = (relevance_score >= 임계값)` 을 기록한다. 대시보드 '전체 공지'는
+모든 행을, 'AI 추천' 탭·모든 알림은 `is_recommended=True` 행만 사용한다.
+`notified_at` 은 알림 계층 소유이므로 절대 건드리지 않는다.
 
 AI 가 최종 권위(authoritative)다: 크롤러의 순진한 키워드 매처(crawler/matcher.py)가
 수집 시점에 남기는 플레이스홀더 행(`reason == "Keyword match"`, score 1.0)은 AI 가
@@ -36,6 +38,7 @@ _COUNTER_FIELDS = (
     "candidates",
     "created",
     "updated",
+    "recommended",
     "below_threshold",
     "downgraded",
     "skipped_existing",
@@ -53,8 +56,9 @@ class RunSummary:
     candidates: int = 0  # 실제 분류를 시도한 (공지,사용자) 쌍 수
     created: int = 0
     updated: int = 0  # 갱신/덮어쓴 InboxNotice(순진한 매처 행 override 포함)
-    below_threshold: int = 0
-    downgraded: int = 0  # 재판정에서 임계값 밑으로 떨어져 기존 행을 삭제한 수
+    recommended: int = 0  # 이번 실행에서 is_recommended=True 로 판정한 쌍 수(추천 수)
+    below_threshold: int = 0  # 임계값 미만(is_recommended=False)으로 저장한 쌍 수
+    downgraded: int = 0  # 재판정에서 is_recommended 가 True→False 로 뒤집힌 행 수(삭제 안 함)
     skipped_existing: int = 0  # 이미 'AI' 로 분류된 쌍이라 LLM 호출 생략(NFR-6)
     errors: int = 0
     llm_calls: int = 0
@@ -110,13 +114,15 @@ def _classify_pair(
     existing_reason: Optional[str],
     summary: RunSummary,
 ) -> None:
-    """(공지, 사용자) 한 쌍을 판정해 ``summary`` 를 갱신한다(inbox upsert/삭제 포함).
+    """(공지, 사용자) 한 쌍을 판정해 ``summary`` 를 갱신한다(inbox upsert).
 
     ``classify_notice`` 와 ``classify_notices_for_user`` 가 공유하는 단일 판정 단위.
     동작 규칙은 ``classify_notice`` 문서와 동일하다:
     - 이미 'AI' 로 분류된 쌍은 ``reclassify=False`` 면 LLM 호출 없이 생략(NFR-6).
       순진한 매처('Keyword match') 행은 생략 대상이 아니라 덮어쓰기 대상.
-    - 임계값 이상만 upsert(멱등), 미만이면 기존 행 삭제(다운그레이드).
+    - 평가한 쌍은 점수와 무관하게 항상 upsert(멱등)하고,
+      ``is_recommended = (score >= threshold)`` 를 함께 저장한다(임계값 미만도 삭제하지
+      않고 is_recommended=False 로 남긴다).
     - ``notified_at`` 은 절대 건드리지 않는다.
     - 개별 실패는 삼켜서 ``summary.errors`` 로만 집계한다(상위 루프 비중단).
 
@@ -155,18 +161,11 @@ def _classify_pair(
         else:
             summary.fallback_calls += 1
 
-        if verdict.score < threshold:
+        is_recommended = verdict.score >= threshold
+        if is_recommended:
+            summary.recommended += 1
+        else:
             summary.below_threshold += 1
-            if not dry_run:
-                # 임계값 밑으로 내려갔는데 기존 행이 있으면 오래된 높은 점수(순진한
-                # 매처 1.0 포함)를 남기지 않도록 행을 삭제한다. notified_at 을 수정하는
-                # 게 아니라 행 자체를 제거한다.
-                deleted, _ = InboxNotice.objects.filter(
-                    user_id=user, notice_id=notice
-                ).delete()
-                if deleted:
-                    summary.downgraded += 1
-            return
 
         if dry_run:
             exists = InboxNotice.objects.filter(
@@ -178,7 +177,15 @@ def _classify_pair(
                 summary.created += 1
             return
 
-        # update_or_create 는 notified_at 을 defaults 에 넣지 않으므로 절대 안 건드린다.
+        # 재판정에서 추천→비추천으로 뒤집힌 행을 집계(삭제하지 않고 값만 갱신).
+        if not is_recommended and InboxNotice.objects.filter(
+            user_id=user, notice_id=notice, is_recommended=True
+        ).exists():
+            summary.downgraded += 1
+
+        # 점수와 무관하게 항상 저장한다: '전체 공지'는 모든 행을, 'AI 추천'·알림은
+        # is_recommended=True 행만 쓴다. update_or_create 는 notified_at 을 defaults 에
+        # 넣지 않으므로 절대 안 건드린다.
         _, created = InboxNotice.objects.update_or_create(
             user_id=user,
             notice_id=notice,
@@ -186,6 +193,7 @@ def _classify_pair(
                 "relevance_score": verdict.score,
                 "matched_keywords": ", ".join(verdict.matched_keywords),
                 "reason": verdict.reason,
+                "is_recommended": is_recommended,
             },
         )
         if created:
@@ -207,10 +215,11 @@ def classify_notice(
 ) -> RunSummary:
     """한 공지를, 그 출처를 구독한 사용자들의 관심 조건과 대조해 inbox 를 채운다.
 
-    - 임계값 이상만 InboxNotice 로 upsert(update_or_create) → 멱등. 순진한 매처가 남긴
-      'Keyword match' 행이 있으면 실제 점수/사유/키워드로 덮어쓴다(AI 가 최종 권위).
-    - 임계값 미만이면, 기존 행이 있을 때 삭제(다운그레이드)하여 오래된 높은 점수를
-      남기지 않는다. 기존 행이 없으면 그냥 건너뛴다(inbox 를 어지럽히지 않음).
+    - 평가한 모든 쌍을 InboxNotice 로 upsert(update_or_create) → 멱등. 점수와 함께
+      `is_recommended = (score >= 임계값)` 를 저장한다. 임계값 미만도 삭제하지 않고
+      is_recommended=False 로 남겨 '전체 공지'에 보이게 한다('AI 추천'·알림만 True 사용).
+      순진한 매처가 남긴 'Keyword match' 행이 있으면 실제 점수/사유/키워드로 덮어쓴다
+      (AI 가 최종 권위).
     - 이미 'AI' 로 분류된 (공지,사용자) 쌍은 `reclassify=False` 면 LLM 호출 없이 생략
       (NFR-6). 단, 순진한 'Keyword match' 행은 생략 대상이 아니라 재판정/덮어쓰기 대상.
     - `notified_at` 은 절대 건드리지 않는다(알림 계층 소유).
@@ -342,12 +351,13 @@ def classify_notices_for_user(
     (주어진 공지들 → 이 사용자 하나) 만 판정한다. 덕분에 사이트별 '동기화' 버튼처럼
     요청 사용자·소수 공지(≤10)만 처리해 LLM 비용을 최소화한다.
 
-    - 임계값 이상만 InboxNotice 로 upsert(멱등), 미만이면 기존 행 삭제(다운그레이드).
+    - 평가한 모든 쌍을 InboxNotice 로 upsert(멱등)하고 is_recommended 를 함께 저장한다
+      (임계값 미만도 삭제하지 않고 is_recommended=False 로 남긴다).
     - 이미 'AI' 로 분류된 (공지,이 사용자) 쌍은 ``reclassify=False`` 면 생략(NFR-6).
     - ``notified_at`` 은 절대 건드리지 않는다(알림 계층 소유).
     - 다른 사용자의 InboxNotice 는 절대 만들지/건드리지 않는다.
 
-    반환: ``RunSummary.as_dict()`` (created 가 '새로 담긴 추천' 수).
+    반환: ``RunSummary.as_dict()`` (created 가 '새로 저장된' 쌍 수).
     """
 
     client = client or get_client()

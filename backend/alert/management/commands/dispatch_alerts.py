@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
@@ -78,12 +77,11 @@ class Command(BaseCommand):
             raise CommandError(f"사용자를 찾을 수 없습니다: {raw}") from exc
 
     def _dry_run(self, user, limit):
-        threshold = settings.LLM_RELEVANCE_THRESHOLD
         pending = list(_pending_queryset(user=user, limit=limit))
         self.stdout.write(
             self.style.WARNING(
                 f"[DRY-RUN] 미발송 대상 {len(pending)}건 "
-                f"(임계값 relevance_score >= {threshold}) — 실제 발송하지 않음"
+                f"(is_recommended=True 행) — 실제 발송하지 않음"
             )
         )
         grouped = _group_by_user(pending)

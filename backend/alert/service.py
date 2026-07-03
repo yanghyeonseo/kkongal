@@ -1,8 +1,10 @@
 """알림 디스패치 오케스트레이션.
 
-파이프라인의 마지막 단계: ``notified_at`` 이 비어 있고 관련도가 임계값 이상인
+파이프라인의 마지막 단계: ``notified_at`` 이 비어 있고 ``is_recommended=True`` 인
 ``InboxNotice`` 를 찾아, 각 사용자의 활성 알림 채널로 발송하고 ``AlertLog`` 를
-기록한 뒤 ``notified_at`` 을 갱신해 중복 발송을 막는다.
+기록한 뒤 ``notified_at`` 을 갱신해 중복 발송을 막는다. AI 추천 여부의 판단
+(관련도 임계값 비교)은 분류 단계(ai/service.py)가 소유하며 여기서는 그 결과인
+``is_recommended`` 만 신뢰한다.
 
 견고성(NFR-3):
   - 한 채널의 실패가 다른 채널 발송을 막지 않고,
@@ -14,7 +16,6 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -27,13 +28,12 @@ logger = logging.getLogger("alert")
 
 
 def _pending_queryset(user=None, limit=None):
-    """발송 대상(미발송 + 임계값 이상) InboxNotice 쿼리셋."""
+    """발송 대상(미발송 + AI 추천) InboxNotice 쿼리셋."""
 
-    threshold = settings.LLM_RELEVANCE_THRESHOLD
     queryset = (
         InboxNotice.objects.filter(
             notified_at__isnull=True,
-            relevance_score__gte=threshold,
+            is_recommended=True,
         )
         .select_related("notice_id", "notice_id__source_id", "user_id")
         .order_by("user_id_id", "-relevance_score", "-created_at", "id")

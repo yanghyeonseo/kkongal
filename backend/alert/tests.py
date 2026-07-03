@@ -62,11 +62,18 @@ class AlertTestBase(TestCase):
         keywords="채용,인턴",
         reason="관심사 '채용'과 관련도가 높습니다.",
         notified_at=None,
+        is_recommended=None,
     ):
+        # 발송 대상 선정은 이제 is_recommended 를 기준으로 한다(관련도 임계값 비교는
+        # 분류 단계 소유). 기본값은 분류가 하듯 score>=임계값(0.5)에서 파생하되,
+        # 점수와 무관하게 값을 검증하고 싶은 테스트는 명시적으로 넘길 수 있다.
+        if is_recommended is None:
+            is_recommended = score >= 0.5
         return InboxNotice.objects.create(
             user_id=user or self.user,
             notice_id=notice,
             relevance_score=score,
+            is_recommended=is_recommended,
             matched_keywords=keywords,
             reason=reason,
             notified_at=notified_at,
@@ -290,6 +297,31 @@ class DedupAndThresholdTests(AlertTestBase):
         dispatch_pending()
 
         self.assertEqual(len(mail.outbox), 1)
+
+    def test_dispatch_filters_on_is_recommended_not_score(self):
+        # 카논 계약: 발송 대상은 is_recommended=True 행뿐이며 relevance_score 는
+        # 발송 여부를 결정하지 않는다(임계값 비교는 분류 단계가 이미 끝냈다).
+        high_not_rec = self.make_notice(
+            "https://snu.example.com/d/hr", title="고득점이지만 비추천"
+        )
+        self.make_inbox(high_not_rec, score=0.95, is_recommended=False)
+        low_rec = self.make_notice(
+            "https://snu.example.com/d/lr", title="저득점이지만 추천"
+        )
+        recommended = self.make_inbox(low_rec, score=0.2, is_recommended=True)
+        self.make_channel("email")
+
+        summary = dispatch_pending()
+
+        # 추천 행 1건만 발송되고, 고득점이라도 비추천 행은 제외된다.
+        self.assertEqual(len(mail.outbox), 1)
+        body = mail.outbox[0].body
+        self.assertIn("저득점이지만 추천", body)
+        self.assertNotIn("고득점이지만 비추천", body)
+        recommended.refresh_from_db()
+        self.assertIsNotNone(recommended.notified_at)
+        self.assertEqual(summary["sent"], 1)
+        self.assertEqual(summary["attempted"], 1)
 
 
 @override_settings(EMAIL_BACKEND=LOCMEM_EMAIL, LLM_RELEVANCE_THRESHOLD=0.5)

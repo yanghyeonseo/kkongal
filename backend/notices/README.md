@@ -8,7 +8,7 @@
 
 | 파일 | 역할 |
 | --- | --- |
-| `models.py` | `Notice`(`source_id`·`url`·`hash`·`title`·`content`·`summary`·`content_markdown`·`publisher`·`published_at`·`deadline_at`·`updated_at`·`created_at`, `(source_id, url)` 유니크), `InboxNotice`(`user_id`·`notice_id`·`relevance_score`·`matched_keywords`·`reason`·`is_read`·`is_saved`·`notified_at`·`created_at`, `(user_id, notice_id)` 유니크) |
+| `models.py` | `Notice`(`source_id`·`url`·`hash`·`title`·`content`·`summary`·`content_markdown`·`publisher`·`published_at`·`deadline_at`·`updated_at`·`created_at`, `(source_id, url)` 유니크), `InboxNotice`(`user_id`·`notice_id`·`relevance_score`·`matched_keywords`·`reason`·`is_read`·`is_saved`·`is_recommended`·`notified_at`·`created_at`, `(user_id, notice_id)` 유니크) |
 | `serializers.py` | `NoticeSerializer`(중첩 source 포함), `InboxNoticeSerializer`(중첩 notice + `deadline_at` 노출), `InboxNoticeSaveSerializer`, `InboxNoticeReadSerializer` |
 | `views.py` | inbox 목록/상세/저장/읽음 뷰 + `AiStatusView` |
 | `urls.py` | `urlpatterns`(`/api/notices/inbox/...`), `ai_urlpatterns`(`/api/ai/status/`) |
@@ -37,6 +37,7 @@ python manage.py run_pipeline --crawl  # 라이브 크롤부터 끝까지
 
 ## 유의사항
 
+- **선별 결과 저장** — AI 선별(`ai.service`)은 모든 `(공지,사용자)` 쌍을 `InboxNotice` 에 저장하되, 관련도가 임계값 이상이면 `is_recommended=true`, 미만이면 false 로 설정한다. 대시보드의 '전체 공지' 탭은 모든 행을 표시하고, 'AI 추천' 탭과 알림은 `is_recommended=true` 행만 대상으로 한다.
 - **알림 발송의 중복 방지 기준은 `InboxNotice.notified_at`** 이다(null=미발송). 이 필드는 알림 계층(`alert`)만 갱신하며, AI 선별(`ai.service`)은 upsert 시에도 절대 건드리지 않는다.
 - `matched_keywords` 는 계약상 콤마-join 문자열로 저장한다. 소비 측(프론트·알림 발송)은 JSON 배열 문자열도 방어적으로 파싱한다.
 - 마감 상태(임박/지남)는 서버가 아니라 프론트가 `deadline_at` 으로 계산한다(0~7일=임박, 음수=지남).

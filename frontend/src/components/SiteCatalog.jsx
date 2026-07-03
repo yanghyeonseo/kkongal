@@ -126,8 +126,8 @@ function SiteCatalog({ isSubscribed, onToggle }) {
                 name={item.name}
                 faviconUrl={item.faviconUrl}
                 siteUrl={item.url}
-                size={40}
-                rounded="12px"
+                size={30}
+                rounded="9px"
                 className="catalogLogo"
               />
               <div className="catalogInfo">

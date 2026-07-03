@@ -44,7 +44,13 @@ class InboxNoticeListView(APIView):
                 description="true이면 저장된 공지만, false이면 저장되지 않은 공지만 조회합니다.",
                 required=False,
                 type=bool,
-            )
+            ),
+            OpenApiParameter(
+                name="recommended",
+                description="true이면 AI 추천(is_recommended) 공지만, false이면 비추천 공지만 조회합니다.",
+                required=False,
+                type=bool,
+            ),
         ],
         responses={200: InboxNoticeSerializer(many=True), 401: "Unauthorized"},
     )
@@ -68,6 +74,18 @@ class InboxNoticeListView(APIView):
             else:
                 return Response(
                     {"detail": "saved must be true or false"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        recommended = request.query_params.get("recommended")
+        if recommended is not None:
+            if recommended.lower() in ("true", "1"):
+                inbox_notices = inbox_notices.filter(is_recommended=True)
+            elif recommended.lower() in ("false", "0"):
+                inbox_notices = inbox_notices.filter(is_recommended=False)
+            else:
+                return Response(
+                    {"detail": "recommended must be true or false"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 

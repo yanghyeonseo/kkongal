@@ -45,8 +45,8 @@ function Header({
   return (
     <header className="header">
       <div className="brand">
-        <img src={logo} className="brandMark" alt="꽁알" />
-        <strong>꽁알</strong>
+        <img src={logo} className="brandMark" alt="꽁알꽁알" />
+        <strong>꽁알꽁알</strong>
       </div>
 
       <div className="searchBox">

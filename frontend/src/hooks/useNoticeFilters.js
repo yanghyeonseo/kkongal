@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { isAiMatched } from "../utils/relevance.js";
 import { filterNotices } from "../utils/noticeFilters.js";
 
 const NOTICES_PER_PAGE = 5;
@@ -52,7 +51,11 @@ export function useNoticeFilters(notices) {
   }, [filteredNotices, currentPage]);
 
   // 배지/카운트는 사이드바 소스 토글과 무관하게 전체 notices 기준으로 센다.
-  const aiCount = useMemo(() => notices.filter(isAiMatched).length, [notices]);
+  // AI 배지는 안 읽은 추천 공지 수만 표시(읽으면 배지에서 빠짐).
+  const aiCount = useMemo(
+    () => notices.filter((n) => n.isRecommended && !n.isRead).length,
+    [notices],
+  );
   const savedCount = useMemo(
     () => notices.filter((notice) => notice.isSaved).length,
     [notices],

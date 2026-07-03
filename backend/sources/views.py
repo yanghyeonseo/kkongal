@@ -1,4 +1,5 @@
 import logging
+import threading
 from datetime import timedelta
 
 from django.db.models.functions import Coalesce
@@ -35,6 +36,37 @@ _SYNC_CLASSIFY_CAP = 10
 _SYNC_RECENT_DAYS = 7
 _SYNC_FETCH_CAP = 20
 _UNSUPPORTED_MESSAGE = "이 사이트는 자동 수집을 지원하지 않아요."
+
+
+def _dispatch_alerts_async(user) -> threading.Thread:
+    """이 사용자의 새 추천 공지 알림을 백그라운드(데몬 스레드)에서 논블로킹 발송한다.
+
+    온디맨드 동기화 응답이 SMTP 왕복(느리거나 멈출 수 있음)을 기다리며 무한 로딩되지
+    않도록, 실제 발송은 별도 스레드에 맡기고 즉시 반환한다(원래의 '무한 로딩' 버그
+    방지). 결과는 서버 로그로만 남는다(best-effort). DB 커넥션은 스레드 로컬이므로
+    작업 후 ``finally`` 에서 이 스레드가 연 커넥션을 반드시 닫는다.
+    """
+
+    def _run():
+        # 지연 import(순환 방지): alert → notices/ai 방향 의존을 뷰 로드시로 미룬다.
+        from alert.service import dispatch_pending
+
+        try:
+            dispatch_pending(user=user)
+        except Exception:  # noqa: BLE001 - 백그라운드 스레드가 조용히 죽지 않도록 방어
+            log.exception("동기화 후 알림 발송 실패 (user=%s)", getattr(user, "id", None))
+        finally:
+            from django.db import connection
+
+            connection.close()
+
+    thread = threading.Thread(
+        target=_run,
+        name=f"sync-dispatch-{getattr(user, 'id', 'anon')}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 class SourceSubscriptionListView(APIView):
@@ -317,7 +349,13 @@ class SourceSyncView(APIView):
         # 이 source 의 가장 최근 공지 최대 10건을 요청 사용자에 대해서만 선별(비용 최소화).
         recent_notices = self._notices_to_classify(source)
         summary = classify_notices_for_user(user, recent_notices)
-        inbox_added = int(summary.get("created", 0))
+        # 저장은 store-all(비추천 포함)이지만, 사용자에게 보여줄/알릴 '새 공지'는 추천분만.
+        inbox_added = int(summary.get("recommended", 0))
+
+        # 새로 추천된 공지가 있으면 이 사용자의 알림을 논블로킹으로 발송한다. SMTP 왕복이
+        # HTTP 응답을 막지 않도록 백그라운드 스레드에 맡긴다(무한 로딩 버그 방지).
+        if inbox_added > 0:
+            _dispatch_alerts_async(user)
 
         message = self._build_message(
             rate_limited=rate_limited,

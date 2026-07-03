@@ -313,6 +313,12 @@ class SyncViewTests(TestCase):
             user_id=self.user, keyword="채용", description="채용 공고", priority=5
         )
         SourceSubscription.objects.create(user_id=self.user, source_id=self.source)
+        # 동기화 후 알림 발송은 논블로킹(데몬 스레드)이다. 테스트에서는 실제 스레드가
+        # 별도 커넥션으로 DB 를 건드려 비결정적이 되지 않도록 목킹하고, '트리거 계약'은
+        # 아래 전용 테스트에서 mock 호출로 검증한다(senders 의 async 패턴과 동일).
+        patcher = patch("sources.views._dispatch_alerts_async")
+        self.mock_dispatch = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _sync(self, source_id, user=None):
         request = self.factory.post(f"/api/sources/{source_id}/sync/")
@@ -434,6 +440,38 @@ class SyncViewTests(TestCase):
                     user_id=self.user, notice_id=stale
                 ).exists()
             )
+
+    def test_sync_triggers_async_alert_dispatch_when_recommended(self) -> None:
+        # 새 추천 공지가 생기면 이 사용자의 알림을 논블로킹으로 발송하도록 트리거한다.
+        self.source.crawled_at = timezone.now()  # 재크롤 생략(순수 선별만)
+        self.source.save(update_fields=["crawled_at"])
+        self._make_notice("rec-1", published_delta=timedelta(minutes=1))
+
+        response = self._sync(self.source.id, user=self.user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["inbox_added"], 1)
+        # 백그라운드 발송이 이 사용자로 정확히 한 번 트리거된다(응답을 막지 않음).
+        self.mock_dispatch.assert_called_once_with(self.user)
+
+    def test_sync_skips_async_dispatch_when_nothing_recommended(self) -> None:
+        # 추천이 0건이면(관심과 무관한 공지만) 알림 스레드를 띄우지 않는다.
+        self.source.crawled_at = timezone.now()
+        self.source.save(update_fields=["crawled_at"])
+        Notice.objects.create(
+            source_id=self.source,
+            url=f"{SUPPORTED_URL}/nomatch-1",
+            title="무관한 소식",
+            content="오늘 날씨가 맑습니다",
+            publisher="SNU",
+            published_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = self._sync(self.source.id, user=self.user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["inbox_added"], 0)
+        self.mock_dispatch.assert_not_called()
 
     def test_live_crawl_failure_is_graceful_not_500(self) -> None:
         # 라이브 사이트 장애(예외)여도 500 대신 crawled=false + 안내 메시지로 200.

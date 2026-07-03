@@ -21,6 +21,7 @@ from sources.models import NoticeSource, SourceSubscription
 
 from ai.enrich import enrich_notice, enrich_notices, parse_deadline
 from ai.llm import PROVIDER_FALLBACK, PROVIDER_LLM, LLMClient, extract_json
+from ai.prompts import build_messages
 from ai.service import NAIVE_REASON, classify_notice, run_classification
 
 User = get_user_model()
@@ -145,24 +146,24 @@ class FallbackPathTests(BaseFixtures):
 
         self.assertEqual(summary.provider, PROVIDER_FALLBACK)
         self.assertEqual(summary.notices_processed, 1)
-        # 매칭 사용자는 inbox 생성
+        # 매칭 사용자는 inbox 생성 + 추천(is_recommended=True)
         self.assertTrue(
             InboxNotice.objects.filter(
                 user_id=self.user_match, notice_id=self.notice
             ).exists()
         )
-        # 비매칭 사용자는 생성 안 됨
-        self.assertFalse(
-            InboxNotice.objects.filter(
-                user_id=self.user_nomatch, notice_id=self.notice
-            ).exists()
+        # store-all: 비매칭 사용자도 저장하되 비추천(is_recommended=False)으로 남긴다.
+        nomatch_row = InboxNotice.objects.get(
+            user_id=self.user_nomatch, notice_id=self.notice
         )
+        self.assertFalse(nomatch_row.is_recommended)
         row = InboxNotice.objects.get(
             user_id=self.user_match, notice_id=self.notice
         )
+        self.assertTrue(row.is_recommended)
         self.assertGreaterEqual(row.relevance_score, 0.5)
         self.assertIn("채용", row.matched_keywords)
-        self.assertIn("관심 키워드와 일치", row.reason)
+        self.assertIn("관심 키워드·설명과 일치", row.reason)
         # 내부 note(미설정/실패 등)는 사용자 노출 reason 에 새지 않아야 한다.
         self.assertNotIn("미설정", row.reason)
         self.assertNotIn("실패", row.reason)
@@ -178,14 +179,15 @@ class FallbackPathTests(BaseFixtures):
         )
 
     def test_skips_already_classified(self) -> None:
+        # store-all: 매칭 사용자(추천)와 비매칭 사용자(비추천) 둘 다 행이 생성된다.
         first = classify_notice(self.notice)
-        self.assertEqual(first.created, 1)
+        self.assertEqual(first.created, 2)
 
-        second = classify_notice(self.notice)  # reclassify=False → 기존 쌍 생략
-        self.assertEqual(second.skipped_existing, 1)  # user_match 생략
-        self.assertEqual(second.candidates, 1)  # user_nomatch 만 재평가
+        second = classify_notice(self.notice)  # reclassify=False → 기존 쌍 모두 생략
+        self.assertEqual(second.skipped_existing, 2)  # 두 사용자 모두 AI 행 존재 → 생략
+        self.assertEqual(second.candidates, 0)  # 재평가 대상 없음
         self.assertEqual(
-            InboxNotice.objects.filter(notice_id=self.notice).count(), 1
+            InboxNotice.objects.filter(notice_id=self.notice).count(), 2
         )
 
     def test_run_classification_default_excludes_only_real_ai_notice(self) -> None:
@@ -204,7 +206,9 @@ class LLMPathTests(BaseFixtures):
 
         self.assertEqual(summary.provider, PROVIDER_LLM)
         self.assertEqual(summary.llm_calls, 2)
-        self.assertEqual(summary.created, 1)
+        # store-all: 두 사용자 모두 행 생성. 매칭만 추천, 비매칭은 비추천.
+        self.assertEqual(summary.created, 2)
+        self.assertEqual(summary.recommended, 1)
         self.assertEqual(summary.below_threshold, 1)
 
         row = InboxNotice.objects.get(
@@ -213,18 +217,20 @@ class LLMPathTests(BaseFixtures):
         self.assertAlmostEqual(row.relevance_score, 0.9)
         self.assertEqual(row.reason, "채용 공고로 판단")
         self.assertEqual(row.matched_keywords, "채용")
-        self.assertFalse(
-            InboxNotice.objects.filter(user_id=self.user_nomatch).exists()
-        )
+        self.assertTrue(row.is_recommended)
+        # 비매칭 사용자도 저장되지만 is_recommended=False (전체 공지엔 보이고 추천/알림엔 제외).
+        nomatch_row = InboxNotice.objects.get(user_id=self.user_nomatch)
+        self.assertFalse(nomatch_row.is_recommended)
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
     def test_idempotent_update_or_create(self) -> None:
         client = make_smart_client()
         run_classification(client=client)
-        # reclassify=True 로 같은 쌍 재판정 → 갱신(중복 생성 아님)
+        # reclassify=True 로 같은 쌍 재판정 → 갱신(중복 생성 아님).
+        # store-all: 매칭·비매칭 두 쌍 모두 기존 행을 갱신한다.
         summary = run_classification(client=client, reclassify=True)
 
-        self.assertEqual(summary.updated, 1)
+        self.assertEqual(summary.updated, 2)
         self.assertEqual(summary.created, 0)
         self.assertEqual(
             InboxNotice.objects.filter(
@@ -233,7 +239,8 @@ class LLMPathTests(BaseFixtures):
             1,
         )
 
-    def test_threshold_gating_blocks_low_score(self) -> None:
+    def test_threshold_gating_marks_low_score_not_recommended(self) -> None:
+        # store-all: 임계값 미만 판정도 삭제하지 않고 is_recommended=False 로 저장한다.
         content = json.dumps(
             {
                 "relevant": True,
@@ -245,9 +252,14 @@ class LLMPathTests(BaseFixtures):
         client = make_fixed_client(content)
         summary = run_classification(client=client, threshold=0.8)
 
-        self.assertEqual(summary.created, 0)
+        self.assertEqual(summary.created, 2)
+        self.assertEqual(summary.recommended, 0)
         self.assertEqual(summary.below_threshold, 2)
-        self.assertFalse(InboxNotice.objects.exists())
+        # 두 행 모두 저장되지만 어느 것도 추천이 아니다.
+        self.assertEqual(InboxNotice.objects.count(), 2)
+        self.assertFalse(
+            InboxNotice.objects.filter(is_recommended=True).exists()
+        )
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
     def test_defensive_parsing_of_codefenced_response(self) -> None:
@@ -328,14 +340,16 @@ class AiAuthoritativeTests(BaseFixtures):
         # 순진한 행은 생략(skip)이 아니라 덮어쓰기(update) 대상.
         self.assertEqual(summary.skipped_existing, 0)
         self.assertEqual(summary.updated, 1)
-        self.assertEqual(summary.created, 0)
+        # store-all: 비매칭 사용자(user_nomatch)의 비추천 행이 새로 생성된다.
+        self.assertEqual(summary.created, 1)
 
         row = InboxNotice.objects.get(id=naive.id)  # 같은 행이 갱신됨(중복 아님)
         self.assertAlmostEqual(row.relevance_score, 0.9)  # 1.0 → 0.9 로 override
         self.assertEqual(row.reason, "채용 공고로 판단")
         self.assertEqual(row.matched_keywords, "채용")
+        self.assertTrue(row.is_recommended)  # 덮어쓴 행은 추천으로 판정됨
         self.assertEqual(
-            InboxNotice.objects.filter(notice_id=self.notice).count(), 1
+            InboxNotice.objects.filter(notice_id=self.notice).count(), 2
         )
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
@@ -353,8 +367,9 @@ class AiAuthoritativeTests(BaseFixtures):
         self.assertEqual(summary.updated, 0)
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
-    def test_ai_override_below_threshold_removes_naive_false_positive(self) -> None:
-        # 순진한 매처가 오탐(1.0)으로 만든 행을, AI 가 '관련 없음'으로 덮어쓰며 삭제.
+    def test_ai_override_below_threshold_marks_naive_not_recommended(self) -> None:
+        # store-all: 순진한 매처 오탐(1.0) 행을 AI 가 '관련 없음'으로 덮어쓰되 삭제하지 않고
+        # is_recommended=False 로 표시한다('전체 공지'엔 남고 추천/알림에선 빠진다).
         naive = self._make_naive_row(self.user_match)
         low_client = make_fixed_client(
             json.dumps(
@@ -368,19 +383,25 @@ class AiAuthoritativeTests(BaseFixtures):
         )
         summary = run_classification(client=low_client)
 
-        self.assertEqual(summary.downgraded, 1)
-        self.assertFalse(InboxNotice.objects.filter(id=naive.id).exists())
+        # 순진한 행은 애초에 is_recommended=False 였으므로 '추천→비추천' 전환이 아니다.
+        self.assertEqual(summary.downgraded, 0)
+        row = InboxNotice.objects.get(id=naive.id)  # 같은 행이 살아있고 갱신됨
+        self.assertFalse(row.is_recommended)
+        self.assertAlmostEqual(row.relevance_score, 0.1)
+        self.assertEqual(row.reason, "실제로는 관련 없음")
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
-    def test_reclassify_below_threshold_deletes_stale_row(self) -> None:
-        # 먼저 관련 있음으로 분류되어 행이 생성됨.
+    def test_reclassify_below_threshold_marks_row_not_recommended(self) -> None:
+        # 먼저 관련 있음으로 분류되어 추천 행이 생성됨.
         run_classification(client=make_smart_client(), threshold=0.5)
         self.assertTrue(
             InboxNotice.objects.filter(
-                user_id=self.user_match, notice_id=self.notice
+                user_id=self.user_match,
+                notice_id=self.notice,
+                is_recommended=True,
             ).exists()
         )
-        # 재판정에서 점수가 임계값 밑으로 → 오래된 행 삭제(다운그레이드).
+        # 재판정에서 점수가 임계값 밑으로 → 행을 삭제하지 않고 is_recommended=False 로 전환.
         low_client = make_fixed_client(
             json.dumps(
                 {
@@ -395,12 +416,13 @@ class AiAuthoritativeTests(BaseFixtures):
             client=low_client, threshold=0.5, reclassify=True
         )
 
+        # 추천→비추천으로 뒤집힌 행이 downgraded 로 집계된다(삭제 아님).
         self.assertEqual(summary.downgraded, 1)
-        self.assertFalse(
-            InboxNotice.objects.filter(
-                user_id=self.user_match, notice_id=self.notice
-            ).exists()
+        row = InboxNotice.objects.get(
+            user_id=self.user_match, notice_id=self.notice
         )
+        self.assertFalse(row.is_recommended)
+        self.assertAlmostEqual(row.relevance_score, 0.2)
 
     @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
     def test_classify_never_touches_notified_at(self) -> None:
@@ -724,3 +746,93 @@ class RecommendationReasonTests(BaseFixtures):
             user_id=self.user_match, notice_id=self.notice
         )
         self.assertTrue(row.reason)
+
+
+class BuildMessagesInterestTests(TestCase):
+    """관심 조건(키워드+설명)이 실제 프롬프트에 실리는지 검증(사용자 우려 대응)."""
+
+    def test_every_interest_keyword_and_description_flows_into_prompt(self) -> None:
+        interests = [
+            {"keyword": "채용", "description": "신입 백엔드 채용 공고", "priority": 5},
+            {"keyword": "장학금", "description": "교내 성적우수 장학금 안내", "priority": 3},
+        ]
+        messages = build_messages(
+            title="제목",
+            content="본문",
+            publisher="ACME",
+            profile={"age": 26, "job": "백엔드 개발자"},
+            interests=interests,
+            summary="",
+        )
+        user_prompt = messages[-1]["content"]
+        # 모든 관심 조건의 키워드와 설명이 프롬프트(user 메시지)에 포함되어야 한다.
+        for interest in interests:
+            self.assertIn(interest["keyword"], user_prompt)
+            self.assertIn(interest["description"], user_prompt)
+
+
+@override_settings(LLM_RELEVANCE_THRESHOLD=0.5)
+class IsRecommendedStorageTests(BaseFixtures):
+    """store-all: 임계값 미만도 저장하되 is_recommended=False, 이상은 True."""
+
+    def test_below_threshold_creates_row_marked_not_recommended(self) -> None:
+        low_client = make_fixed_client(
+            json.dumps(
+                {
+                    "relevant": False,
+                    "score": 0.3,
+                    "matched_keywords": [],
+                    "reason": "약한 관련",
+                }
+            )
+        )
+        classify_notice(self.notice, client=low_client)
+
+        # 삭제되지 않고 저장되며 is_recommended=False.
+        row = InboxNotice.objects.get(
+            user_id=self.user_match, notice_id=self.notice
+        )
+        self.assertFalse(row.is_recommended)
+        self.assertAlmostEqual(row.relevance_score, 0.3)
+
+    def test_above_threshold_creates_row_marked_recommended(self) -> None:
+        high_client = make_fixed_client(
+            json.dumps(
+                {
+                    "relevant": True,
+                    "score": 0.8,
+                    "matched_keywords": ["채용"],
+                    "reason": "강한 관련",
+                }
+            )
+        )
+        classify_notice(self.notice, client=high_client)
+
+        row = InboxNotice.objects.get(
+            user_id=self.user_match, notice_id=self.notice
+        )
+        self.assertTrue(row.is_recommended)
+        self.assertAlmostEqual(row.relevance_score, 0.8)
+
+
+class FallbackDescriptionMatchTests(TestCase):
+    """degraded/quota 폴백이 keyword 뿐 아니라 interest description 토큰도 매칭한다."""
+
+    @override_settings(LLM_API_KEY="")
+    def test_description_token_matches_when_keyword_does_not(self) -> None:
+        client = LLMClient(api_key="")  # 비활성 → 결정론적 폴백 경로
+        verdict = client.classify(
+            title="사내 LLM 리서치 세미나",
+            content="최신 AI research 동향을 공유합니다.",
+            interests=[{"keyword": "동아리", "description": "AI research 관심"}],
+        )
+
+        # keyword('동아리')는 본문에 없지만 description 토큰(AI/research)이 매칭되어 추천.
+        self.assertEqual(verdict.provider, PROVIDER_FALLBACK)
+        self.assertGreaterEqual(verdict.score, 0.5)
+        lowered = [k.lower() for k in verdict.matched_keywords]
+        self.assertTrue(
+            any(tok in lowered for tok in ("research", "ai")),
+            verdict.matched_keywords,
+        )
+        self.assertNotIn("동아리", verdict.matched_keywords)

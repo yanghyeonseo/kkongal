@@ -42,6 +42,7 @@ class InboxNoticeSerializer(serializers.ModelSerializer):
             "notice",
             "deadline_at",
             "relevance_score",
+            "is_recommended",
             "matched_keywords",
             "reason",
             "is_read",
