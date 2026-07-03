@@ -87,3 +87,6 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Local operational state (not committed)
+.omc/
