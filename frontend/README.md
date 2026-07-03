@@ -24,7 +24,7 @@ frontend/
 
 | 영역 | 파일 | 역할 |
 | --- | --- | --- |
-| API | `client.js` | 공통 `apiRequest` — same-origin + `credentials:"include"`, `access_token` 쿠키를 Bearer 로 첨부, 401 시 refresh 후 1회 재시도(dedupe), `ApiError` |
+| API | `client.js` | 공통 `apiRequest` — same-origin + `credentials:"include"`(HttpOnly 인증 쿠키 자동 전송, JS 토큰 취급 없음), 401 시 refresh 후 1회 재시도(dedupe), refresh 마저 실패하면 세션 만료 핸들러(`setUnauthorizedHandler`) 호출, `ApiError` |
 | API | `authApi.js` | me/signup/signin/logout/onboarding, user 정규화, localStorage 캐시 |
 | API | `inboxApi.js` | 공지함 조회·저장·읽음(응답을 카드용 형태로 정규화, 마감 D-day 계산) |
 | API | `sourceApi.js` | 구독 목록/등록/삭제, 카탈로그, 표시명 편집, 동기화 |
@@ -63,7 +63,7 @@ dev 서버는 3000 포트에서 뜨고 `/api` 요청을 백엔드(127.0.0.1:8000
 
 - **TypeScript 가 아니라 JavaScript/JSX** 다(`@types/*` 는 에디터 힌트용 devDependency). 라우터·전역 상태 라이브러리는 쓰지 않는다.
 - API 계층은 백엔드 스네이크케이스 응답을 카멜케이스 뷰 모델로 **정규화**한다. 백엔드 계약(`snake_case`)이 바뀌면 해당 `api/*.js` 의 정규화 함수를 함께 고쳐야 한다.
-- 인증 흐름(`credentials:"include"` + 쿠키→Bearer, 401 refresh 재시도)은 `client.js` 에 집약돼 있으니 개별 호출에서 토큰을 다루지 않는다.
+- 인증 흐름(`credentials:"include"` 로 HttpOnly 쿠키 자동 전송, 401 refresh 재시도, 재발급 실패 시 세션 만료 처리)은 `client.js` 에 집약돼 있으니 개별 호출에서 토큰을 다루지 않는다.
 - 마감 상태(임박 0~7일 / 지남)와 "강한 AI 추천"(관련도 0.8 이상 또는 매칭 태그 존재)은 프론트가 계산한다(`utils/date.js`·`utils/relevance.js`).
 - 브랜드 로고는 `src/assets/logo.png` 에 있고 `Header`·`Landing`·`OnboardingWizard` 가 import 한다.
 - 백엔드가 `onboarded` 를 안 내려주면(구버전) 위저드를 띄우지 않는 안전장치가 있다 — 온보딩은 명시적으로 `false` 일 때만 표시된다.

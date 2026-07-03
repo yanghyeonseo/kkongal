@@ -19,6 +19,9 @@ class Notice(models.Model):
     # AI 보강(enrichment) 산출물 — 공지당 1회 채운다(ai/enrich.py). 사용자 무관.
     summary = models.TextField(blank=True)  # 한국어 3문장 요약
     content_markdown = models.TextField(blank=True)  # 원문 정보를 보존한 깔끔한 markdown
+    # 보강이 실제 LLM 으로 완료됐는지. 오프라인 폴백(요약=본문 앞부분)으로 채운 경우는
+    # False 로 남겨, LLM 이 살아나면 다시 보강해 품질을 끌어올린다(폴백 고착 방지).
+    enriched_by_llm = models.BooleanField(default=False)
     publisher = models.CharField(max_length=128, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     deadline_at = models.DateTimeField(null=True, blank=True)
@@ -57,6 +60,9 @@ class InboxNotice(models.Model):
     is_recommended = models.BooleanField(default=False)
     matched_keywords = models.TextField(blank=True)
     reason = models.TextField(blank=True)
+    # 이 (공지,사용자) 쌍이 실제 LLM 으로 선별됐는지. 순진한 매처 플레이스홀더나 결정론적
+    # 키워드 폴백으로 만든 행은 False → LLM 이 살아나면 다시 판정해 덮어쓴다(폴백 고착 방지).
+    classified_by_llm = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)
     is_saved = models.BooleanField(default=False)
     # 알림 발송 시각. null 이면 아직 미발송 → 알림 디스패처의 중복 발송 방지 기준.

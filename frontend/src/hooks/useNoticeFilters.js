@@ -8,7 +8,7 @@ const NOTICES_PER_PAGE = 5;
  * 뷰/카테고리/관심사/소스/검색어/페이지 상태를 소유하고, 필터 적용된 목록과
  * 페이지 슬라이스, 배지 카운트를 계산한다.
  */
-export function useNoticeFilters(notices) {
+export function useNoticeFilters(notices, interests = []) {
   const [selectedView, setSelectedView] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedInterests, setSelectedInterests] = useState([]);
@@ -19,6 +19,17 @@ export function useNoticeFilters(notices) {
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedView, selectedCategory, selectedInterests, activeSourceIds, searchQuery]);
+
+  // 관심사 목록이 바뀌면(삭제 등) selectedInterests 를 현재 키워드와의 교집합으로 정리한다.
+  // 이렇게 하지 않으면 삭제된 관심사가 칩은 사라진 채로 계속 필터링해(보이지 않는 필터)
+  // 공지가 이유 없이 비어 보인다.
+  useEffect(() => {
+    const keywords = new Set(interests.map((interest) => interest.keyword));
+    setSelectedInterests((prev) => {
+      const next = prev.filter((keyword) => keywords.has(keyword));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [interests]);
 
   const sourceFilteredNotices = useMemo(() => {
     if (activeSourceIds.length === 0) return [];
@@ -45,6 +56,13 @@ export function useNoticeFilters(notices) {
   ]);
 
   const totalPages = Math.ceil(filteredNotices.length / NOTICES_PER_PAGE) || 1;
+
+  // 필터된 목록이 줄어(예: 2페이지에서 저장 해제 → 항목이 빠짐) 현재 페이지가 범위를
+  // 벗어나면 마지막 페이지로 당긴다. 안 그러면 빈 슬라이스가 나와 가짜 빈 상태가 뜬다.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   const paginatedNotices = useMemo(() => {
     const startIndex = (currentPage - 1) * NOTICES_PER_PAGE;
     return filteredNotices.slice(startIndex, startIndex + NOTICES_PER_PAGE);

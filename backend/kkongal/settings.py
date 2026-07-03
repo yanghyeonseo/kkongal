@@ -11,8 +11,12 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import sys
 import environ
 from datetime import timedelta
+
+# 테스트 실행 중인지 여부(스로틀을 끄는 등 테스트 전용 분기에 사용).
+TESTING = 'test' in sys.argv or 'pytest' in sys.modules
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,7 +36,9 @@ environ.Env.read_env(
 SECRET_KEY = env('SECRET_KEY')
 DEBUG = env('DEBUG')
 
-ALLOWED_HOSTS = []
+# 프로덕션에서는 ALLOWED_HOSTS 에 실제 도메인을 콤마로 나열한다(예: "kkongal.cloud").
+# DEBUG=False + 빈 목록이면 Django 가 모든 요청을 400 으로 막으므로 기본은 로컬 호스트.
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
 
 # Application definition
@@ -59,6 +65,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise: gunicorn 뒤에서 admin/DRF/Spectacular 정적 파일을 직접 서빙(SecurityMiddleware 바로 다음).
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -90,13 +98,18 @@ WSGI_APPLICATION = 'kkongal.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
+#
+# DATABASE_URL 로 DB 를 주입한다(12-factor). 미설정 시 로컬 SQLite 로 폴백한다.
+# 프로덕션(AWS): DATABASE_URL=postgres://USER:PW@HOST:5432/DBNAME 를 환경변수/Secrets 로 주입.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': env.db(
+        'DATABASE_URL',
+        default='sqlite:///' + str(BASE_DIR / 'db.sqlite3'),
+    )
 }
+# RDS 등 원격 DB 에서 커넥션 재사용 + 헬스체크(끊긴 커넥션 자동 폐기).
+DATABASES['default']['CONN_MAX_AGE'] = env.int('DB_CONN_MAX_AGE', default=60)
+DATABASES['default']['CONN_HEALTH_CHECKS'] = True
 
 
 # Password validation
@@ -123,7 +136,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# 한국 사용자·한국 사이트 대상 서비스이므로 KST 로 저장·표시한다. 크롤러가 파싱한
+# naive 로컬 시각을 이 존 기준으로 aware 화하면 published_at/deadline_at 이 어긋나지 않는다.
+TIME_ZONE = env('TIME_ZONE', default='Asia/Seoul')
 
 USE_I18N = True
 
@@ -134,16 +149,40 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# collectstatic 산출물 위치(nginx 또는 WhiteNoise 가 서빙). 배포 시 collectstatic 실행.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+# 프로덕션에서만 해시 매니페스트+압축 스토리지 사용. DEBUG 에서는 매니페스트가 없어
+# {% static %} 해석이 깨질 수 있으므로 기본 스토리지를 유지한다(로컬/테스트 안전).
+if not DEBUG:
+    STORAGES = {
+        'default': {
+            'BACKEND': 'django.core.files.storage.FileSystemStorage',
+        },
+        'staticfiles': {
+            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        },
+    }
 
 REST_FRAMEWORK = {
-    'DEFAULT_PERMISSION_CLASSES' : (
-        'rest_framework.permissions.AllowAny', 
+    # 기본을 '인증 필요'로 두어 fail-closed. 공개 엔드포인트만 명시적으로 AllowAny 를 단다
+    # (SignUp/SignIn/TokenRefresh/AiStatus/SourceCatalog/healthz 등).
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         # 헤더(Bearer) + access_token 쿠키 모두 지원(프론트 쿠키 흐름 인증)
         'account.authentication.CookieJWTAuthentication',
-    )
+    ),
+    # ScopedRateThrottle 을 기본으로 두되, throttle_scope 를 지정한 뷰(로그인/회원가입)만
+    # 실제로 제한된다. 이를 통해 인증 엔드포인트 무차별 대입(brute-force)을 완화한다.
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.ScopedRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        # 테스트 중에는 누적 요청으로 인한 오탐 429 를 피하기 위해 제한을 끈다.
+        'auth': None if TESTING else env('THROTTLE_AUTH', default='10/min'),
+    },
 }
 
 SPECTACULAR_SETTINGS = {
@@ -153,10 +192,12 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
-CORS_ALLOWED_ORIGINS= [
-  'http://127.0.0.1:3000', 
-  'http://localhost:3000',
-]
+# 프로덕션에서 SPA 를 다른 오리진에서 서빙한다면 CORS_ALLOWED_ORIGINS 에 그 오리진을
+# 콤마로 나열한다. 권장 배포(nginx 동일 오리진)에서는 CORS 자체가 불필요하다.
+CORS_ALLOWED_ORIGINS = env.list(
+    'CORS_ALLOWED_ORIGINS',
+    default=['http://127.0.0.1:3000', 'http://localhost:3000'],
+)
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = (
     "accept",
@@ -176,6 +217,57 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+}
+
+# ── 인증 쿠키 플래그 ─────────────────────────────────────────────────────────
+# access_token/refresh_token 쿠키에 적용. HttpOnly 로 JS 접근(XSS 탈취)을 막고,
+# 프로덕션(HTTPS)에서는 Secure 를, SameSite=Lax 로 CSRF 를 완화한다. 동일 오리진
+# 배포에서는 쿠키가 first-party 로 오간다. refresh_token 은 재발급 경로에만 실린다.
+AUTH_COOKIE_HTTPONLY = True
+AUTH_COOKIE_SECURE = env.bool('AUTH_COOKIE_SECURE', default=not DEBUG)
+AUTH_COOKIE_SAMESITE = env('AUTH_COOKIE_SAMESITE', default='Lax')
+
+# ── HTTPS·보안 하드닝(프로덕션 전용) ─────────────────────────────────────────
+# 앞단(nginx 등)이 TLS 를 종료하고 X-Forwarded-Proto 로 스킴을 전달한다고 가정한다.
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
+    SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=60 * 60 * 24 * 30)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# ── 로깅 ─────────────────────────────────────────────────────────────────────
+# 모든 로그를 stdout 으로 보낸다(systemd/journald·CloudWatch 친화). LOG_LEVEL 로 조절.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': env('LOG_LEVEL', default='INFO'),
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': env('DJANGO_LOG_LEVEL', default='INFO'),
+            'propagate': False,
+        },
+    },
 }
 
 # ── AI 공지 선별 (LLM, OpenAI 호환 Chat Completions) ─────────────────────────
@@ -215,3 +307,8 @@ SLACK_TIMEOUT_SECONDS = env.float('SLACK_TIMEOUT_SECONDS', default=10.0)
 
 # 알림 메일/슬랙 메시지의 "대시보드에서 보기" 링크 등에 사용
 FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
+
+# ── 크롤러 ───────────────────────────────────────────────────────────────────
+# 외부 사이트 스크래핑 시 TLS 인증서 검증 여부(기본 True). 특정 사이트의 체인 문제로만
+# 임시 완화(False)한다. 완화 시 주입 공격에 노출될 수 있으니 프로덕션에서는 True 유지.
+CRAWLER_VERIFY_TLS = env.bool('CRAWLER_VERIFY_TLS', default=True)

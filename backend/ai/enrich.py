@@ -7,7 +7,8 @@
 - ``content_markdown``: 원문 정보를 보존한 깔끔한 markdown
 
 안전 장치:
-- **멱등**(NFR-6): ``notice.summary`` 가 이미 있으면 LLM 호출 없이 skip(``force`` 로 재보강).
+- **멱등**(NFR-6): 이미 LLM 으로 보강된(``enriched_by_llm``) 공지는 호출 없이 skip
+  (``force`` 로 재보강). 폴백으로만 채운 공지는 skip 하지 않아 LLM 이 살아나면 재보강된다.
 - 키 없음/호출 실패 시 오프라인 폴백(요약=본문 앞부분, markdown=원문, deadline=None).
 - 어떤 경우에도 예외를 밖으로 던지지 않는다(개별 실패는 삼켜 카운트로만 집계).
 
@@ -87,7 +88,8 @@ def enrich_notice(
 ) -> dict:
     """한 공지를 보강해 summary/content_markdown/deadline_at 를 저장한다.
 
-    - **멱등**: ``notice.summary`` 가 이미 있고 ``force=False`` 면 LLM 호출 없이 skip.
+    - **멱등**: 이미 LLM 으로 보강됐고(``enriched_by_llm``) ``force=False`` 면 호출 없이 skip.
+      폴백으로만 채운 공지는 skip 하지 않아 LLM 복구 시 재보강된다(폴백 고착 방지).
     - LLM **1회** 호출로 세 필드를 산출. 키 없음/실패 시 오프라인 폴백으로 저장.
     - ``notified_at`` 등 다른 계층 소유 필드는 건드리지 않는다(update_fields 로 한정).
     - 어떤 경우에도 예외를 밖으로 던지지 않는다.
@@ -98,8 +100,8 @@ def enrich_notice(
 
     notice_id = getattr(notice, "id", None)
 
-    if not force and (notice.summary or "").strip():
-        # 이미 보강된 공지 → 비용 절약을 위해 재호출 생략(NFR-6).
+    if not force and notice.enriched_by_llm:
+        # 이미 LLM 으로 보강된 공지 → 비용 절약을 위해 재호출 생략(NFR-6).
         return {
             "status": "skipped",
             "provider": "none",
@@ -117,11 +119,14 @@ def enrich_notice(
         # 보강이 마감일을 못 뽑아냈으면(LLM null / 폴백) 크롤러가 넣어 둔 기존
         # deadline_at 을 덮어써 지우지 않는다 — 있는 마감일을 보존한다.
         notice.deadline_at = deadline or notice.deadline_at
+        # LLM 이 실제로 보강했을 때만 '완료'로 표시. 폴백이면 False 로 남겨 재보강 여지를 둔다.
+        notice.enriched_by_llm = result.provider == PROVIDER_LLM
         notice.save(
             update_fields=[
                 "summary",
                 "content_markdown",
                 "deadline_at",
+                "enriched_by_llm",
                 "updated_at",
             ]
         )

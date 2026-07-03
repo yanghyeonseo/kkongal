@@ -81,8 +81,10 @@ class InboxFixtures(TestCase):
 class InboxListTests(InboxFixtures):
     def test_requires_authentication(self) -> None:
         response = self.client.get(INBOX_URL)
+        # 프로젝트 기본 권한이 IsAuthenticated 이므로 미인증 요청은 401 로 막힌다
+        # (본문 메시지는 DRF 표준 detail 을 따른다).
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertEqual(response.data, {"detail": "please signin"})
+        self.assertIn("detail", response.data)
 
     def test_lists_only_requesting_users_notices(self) -> None:
         self.client.force_authenticate(user=self.user)

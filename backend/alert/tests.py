@@ -196,11 +196,33 @@ class SlackDispatchTests(AlertTestBase):
         # 업스트림 응답 본문("server error")은 API 로 노출되는 error 에 새지 않는다(H3).
         self.assertNotIn("server error", log.error)
         self.assertIsNone(log.sent_at)
-        # 실패해도 시도했으므로 재발송 방지를 위해 notified_at 은 설정됨
+        # 유일한 채널이 실패했으므로(전 채널 실패) notified_at 은 미설정 → 다음 주기에 재시도.
         inbox.refresh_from_db()
-        self.assertIsNotNone(inbox.notified_at)
+        self.assertIsNone(inbox.notified_at)
         self.assertEqual(summary["failed"], 1)
         self.assertEqual(summary["sent"], 0)
+        self.assertEqual(summary["users_notified"], 0)
+
+    @mock.patch("alert.senders.httpx.post")
+    def test_failed_dispatch_is_retried_on_next_run(self, mock_post):
+        # 전 채널 실패한 공지는 notified_at 이 남아 다음 디스패치에서 재시도된다.
+        mock_post.side_effect = [
+            make_slack_response(500, "server error"),  # 1차: 실패
+            make_slack_response(200, "ok"),  # 2차: 채널 복구 후 성공
+        ]
+        notice = self.make_notice("https://snu.example.com/s/retry")
+        inbox = self.make_inbox(notice)
+        self.make_channel("slack", config={"webhook_url": "https://hooks.slack.com/r"})
+
+        first = dispatch_pending()
+        inbox.refresh_from_db()
+        self.assertIsNone(inbox.notified_at)  # 실패 → 보류(재시도 대상)
+        self.assertEqual(first["sent"], 0)
+
+        second = dispatch_pending()  # 같은 공지가 재시도된다
+        inbox.refresh_from_db()
+        self.assertIsNotNone(inbox.notified_at)  # 성공 → 발송 완료
+        self.assertEqual(second["sent"], 1)
 
     @mock.patch("alert.senders.httpx.post")
     def test_slack_exception_is_captured_not_raised(self, mock_post):

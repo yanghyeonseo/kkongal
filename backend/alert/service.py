@@ -8,7 +8,9 @@
 
 견고성(NFR-3):
   - 한 채널의 실패가 다른 채널 발송을 막지 않고,
-  - 한 사용자의 예상치 못한 오류가 전체 루프를 중단시키지 않는다(사용자 단위 격리).
+  - 한 사용자의 예상치 못한 오류가 전체 루프를 중단시키지 않는다(사용자 단위 격리),
+  - 한 채널이라도 성공해야 ``notified_at`` 을 갱신한다. 전 채널이 실패하면 미발송으로
+    남겨 다음 주기에 재시도한다(일시적 장애로 인한 알림 유실 방지).
 """
 
 from __future__ import annotations
@@ -121,6 +123,7 @@ def _dispatch_for_user(user_obj, inbox_notices, summary) -> None:
     items = [alert_item_from_inbox(inbox) for inbox in inbox_notices]
     now = timezone.now()
     logs: list[AlertLog] = []
+    any_sent = False
 
     for channel, sender in deliverable:
         summary["attempted"] += 1
@@ -137,6 +140,7 @@ def _dispatch_for_user(user_obj, inbox_notices, summary) -> None:
             for inbox in inbox_notices
         )
         if ok:
+            any_sent = True
             summary["sent"] += 1
             logger.info(
                 "발송 성공: 사용자=%s 채널=%s(%s) 공지=%d건",
@@ -155,18 +159,19 @@ def _dispatch_for_user(user_obj, inbox_notices, summary) -> None:
                 error,
             )
 
-    # 로그 기록과 notified_at 갱신을 하나의 트랜잭션으로 묶어, 둘 사이에서
-    # 크래시가 나 'AlertLog=sent 인데 notified_at=NULL' 같은 어긋난 상태가
-    # 남지 않게 한다. notified_at 은 마지막에 갱신(at-least-once 편향: 커밋 전
-    # 크래시 시 재시도되어 중복 발송될 수 있으나 유실보다는 낫다).
-    # S3(부분 실패): 일부 채널이 실패해도 notified_at 은 갱신한다. 성공한 채널로의
-    # 중복 발송을 피하기 위한 의도된 at-most-once 선택(실패 채널은 재시도하지 않음).
+    # 로그 기록과 notified_at 갱신을 하나의 트랜잭션으로 묶어, 둘 사이에서 크래시가 나
+    # 'AlertLog=sent 인데 notified_at=NULL' 같은 어긋난 상태가 남지 않게 한다.
+    # notified_at 은 '한 채널이라도 성공'했을 때만 갱신한다:
+    #   - 전 채널 실패(일시적 SMTP/webhook 오류 등) → 미발송으로 남겨 다음 주기에 재시도(유실 방지).
+    #   - 부분 성공 → 성공한 채널로의 중복 발송을 피하려 갱신한다(실패 채널은 재시도 안 함).
     with transaction.atomic():
         AlertLog.objects.bulk_create(logs)
-        InboxNotice.objects.filter(
-            id__in=[inbox.id for inbox in inbox_notices]
-        ).update(notified_at=now)
-    summary["users_notified"] += 1
+        if any_sent:
+            InboxNotice.objects.filter(
+                id__in=[inbox.id for inbox in inbox_notices]
+            ).update(notified_at=now)
+    if any_sent:
+        summary["users_notified"] += 1
 
 
 def _safe_send(sender, channel, items, user_obj) -> tuple[bool, str]:

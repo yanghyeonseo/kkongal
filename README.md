@@ -17,7 +17,7 @@
 - **자동 수집**: 등록된 사이트의 공지를 주기적으로 확인해 제목·본문·게시일·마감일을 구조화해 저장한다.
 - **AI 보강·선별**: 공지당 1회 요약·정리(markdown)·마감일을 뽑고(enrich), LLM 이 사용자 관심 조건과 의미 기준으로 대조해 관련도·선별 사유와 함께 필요한 것만 남긴다(classify).
 - **통합 대시보드**: 선별된 공지를 출처·시간·관련도와 함께 한 화면에 모아 보여준다.
-- **멀티채널 알림**: 새 공지를 이메일·슬랙으로 전달한다. 중복 발송은 막는다.
+- **멀티채널 알림**: 새 공지를 이메일·슬랙으로 전달한다. 중복 발송은 막고, 일시적 발송 실패는 다음 주기에 재시도한다.
 
 ## 구성
 
@@ -54,7 +54,7 @@ flowchart LR
 | 영역     | 사용 기술                                                                          |
 | -------- | ---------------------------------------------------------------------------------- |
 | Frontend | React 19, Vite, JavaScript(JSX), lucide-react                                      |
-| Backend  | Python 3.12, Django 6, Django REST Framework, SQLite                               |
+| Backend  | Python 3.12, Django 6, Django REST Framework, SQLite(개발)·PostgreSQL(배포)         |
 | Crawler  | httpx, BeautifulSoup(lxml), pydantic — 정적 HTML                                   |
 | AI       | OpenAI 호환 LLM 3단 캐스케이드 (1차 Gemini Flash‑Lite → 2차 Gemma → 결정론적 폴백) |
 | Alert    | 이메일(SMTP), 슬랙(Incoming Webhook)                                               |
@@ -62,7 +62,7 @@ flowchart LR
 ```
 kkongal/
 ├── frontend/          # React + Vite 웹 클라이언트 (로고: src/assets/logo.png)
-├── backend/           # Django 서버 (SQLite)
+├── backend/           # Django 서버 (개발 SQLite · 배포 PostgreSQL)
 │   ├── account/       # 사용자·인증(쿠키 JWT)·관심사
 │   ├── sources/       # 공지 출처·구독·카탈로그·동기화
 │   ├── notices/       # 공지 원본·사용자별 공지함(inbox)
@@ -115,6 +115,10 @@ npm run dev                          # http://localhost:3000 (→ /api 는 백�
 ```
 
 사용자는 웹 UI 의 사이트별 **동기화** 버튼으로도 즉시 크롤·선별을 돌릴 수 있다(`POST /api/sources/<id>/sync/`).
+
+### 4) 배포 (AWS)
+
+Docker 없이 **EC2 + systemd + nginx + RDS PostgreSQL** 로 배포한다. nginx 가 빌드된 SPA 를 서빙하고 `/api` 를 gunicorn 으로 프록시하며(동일 오리진 → JWT 쿠키 first-party), 파이프라인은 systemd 타이머가 `run_pipeline` 을 주기 실행한다. 단계별 절차·설정 파일은 [docs/DEPLOY.md](docs/DEPLOY.md) 와 `deploy/` 를 참고한다.
 
 ### 환경 변수
 

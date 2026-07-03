@@ -42,4 +42,4 @@ python manage.py run_pipeline --crawl  # 라이브 크롤부터 끝까지
 - `matched_keywords` 는 계약상 콤마-join 문자열로 저장한다. 소비 측(프론트·알림 발송)은 JSON 배열 문자열도 방어적으로 파싱한다.
 - 마감 상태(임박/지남)는 서버가 아니라 프론트가 `deadline_at` 으로 계산한다(0~7일=임박, 음수=지남).
 - AI 상태(`AiStatusView`)는 민감정보가 없어 공개(`AllowAny`)다. 나머지 inbox 뷰는 모두 로그인 사용자 본인 데이터로 한정된다.
-- 크롤러의 순진한 키워드 매처가 남기는 플레이스홀더 inbox 행(`reason == "Keyword match"`, score 1.0)은 AI 선별이 실제 점수/사유로 덮어쓴다(→ `ai/service.py`).
+- 크롤러의 순진한 키워드 매처가 남기는 플레이스홀더 inbox 행(`classified_by_llm=False`)은 AI 선별이 실제 점수/사유로 덮어쓴다. 키워드 폴백으로 만든 행도 `classified_by_llm=False` 라 LLM 복구 시 다시 판정된다(→ `ai/service.py`).

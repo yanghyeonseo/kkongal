@@ -1,0 +1,23 @@
+# =============================================================================
+# kkongal 파이프라인(crawl→enrich→classify→dispatch) 1회 실행 유닛.
+# kkongal-pipeline.timer 가 이 유닛을 주기적으로 트리거한다(상주 스케줄러 대신).
+#
+# 설치:
+#   sudo cp deploy/kkongal-pipeline.service /etc/systemd/system/
+#   sudo cp deploy/kkongal-pipeline.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kkongal-pipeline.timer
+#   systemctl list-timers kkongal-pipeline.timer   # 다음 실행 시각 확인
+#   journalctl -u kkongal-pipeline -f              # 실행 로그 확인
+# =============================================================================
+[Unit]
+Description=kkongal notice pipeline (one-shot)
+After=network.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/kkongal/backend
+EnvironmentFile=/home/ubuntu/kkongal/backend/.env
+ExecStart=/home/ubuntu/kkongal/backend/.venv/bin/python manage.py run_pipeline

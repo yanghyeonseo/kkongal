@@ -43,14 +43,18 @@ class Command(BaseCommand):
             return False
 
     def _enrich_step(self) -> bool:
-        """신규(미보강) 공지에 공지당 1회 AI 보강(마감일/요약/마크다운)."""
+        """신규(미보강) 공지에 공지당 1회 AI 보강(마감일/요약/마크다운).
+
+        후보 = 아직 LLM 으로 보강되지 않은 공지(``enriched_by_llm=False``). 폴백으로만
+        채운 공지도 여기 포함돼, LLM 이 복구되면 다시 보강된다(폴백 고착 방지).
+        """
         self.stdout.write(self.style.MIGRATE_HEADING("\n▶ 공지 보강 (enrich_notices)"))
         try:
             from ai.enrich import enrich_notices
             from notices.models import Notice
 
             pending = list(
-                Notice.objects.filter(summary="").order_by("-id")[:200]
+                Notice.objects.filter(enriched_by_llm=False).order_by("-id")[:200]
             )
             summary = enrich_notices(pending)
             self.stdout.write(f"  대상 {len(pending)}건 · {summary}")

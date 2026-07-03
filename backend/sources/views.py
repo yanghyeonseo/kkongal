@@ -2,6 +2,7 @@ import logging
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
@@ -128,6 +129,9 @@ class SourceSubscriptionDetailView(APIView):
 
 
 class SourceCatalogView(APIView):
+    # 카탈로그는 비로그인도 열람 가능(로그인 시 구독 여부를 추가로 표시). 공개 엔드포인트.
+    permission_classes = [AllowAny]
+
     @extend_schema(
         summary="지원 사이트 카탈로그",
         description=(

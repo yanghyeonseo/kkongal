@@ -279,7 +279,15 @@ class ClassifyNoticesForUserTests(TestCase):
         )
 
     def test_idempotent_skips_already_classified(self) -> None:
-        classify_notices_for_user(self.user_a, [self.notice])
+        # LLM 으로 확정된 쌍(classified_by_llm=True)만 재판정 없이 생략된다. (폴백 행은
+        # 아직 확정 전이라 재처리 대상 — 폴백 고착 방지, ai 앱 테스트에서 검증.)
+        InboxNotice.objects.create(
+            user_id=self.user_a,
+            notice_id=self.notice,
+            relevance_score=0.9,
+            reason="채용 공고로 판단",
+            classified_by_llm=True,
+        )
         summary = classify_notices_for_user(self.user_a, [self.notice])
 
         self.assertEqual(summary["created"], 0)
