@@ -46,5 +46,5 @@ python manage.py run_scheduler --interval-minutes 30  # 30분 루프
 - `--source` 없이 실행하면 여러 외부 사이트에 연속 요청하므로, 개별 확인은 `--source` 로 한 사이트씩 하는 것을 권장한다. 사이트 사이에는 예의상 요청 지연(`request_delay_seconds`)을 둔다(NFR-5).
 - 파이프라인 표준 경로는 **순진한 매칭을 끄고(`--no-match`) AI 선별을 유일한 선별기로** 둔다. `run_scheduler`·sync 는 항상 `match_inbox=False` 로 크롤한다. `matcher.py` 는 AI 없이 크롤만 돌릴 때의 폴백으로 남겨둔 것이다.
 - 게시일 파싱에 실패하면 `published_at` 은 `null` 로 저장된다. 사이트 구조가 바뀌면 해당 스크래퍼의 파싱 로직을 다시 확인해야 한다.
-- `fetcher.py` 는 개발 환경 편의를 위해 `verify=False`(SSL 검증 생략)·`trust_env=False` 로 열려 있다. 운영 배포 전에는 설정으로 분리·재검토가 필요하다.
+- `fetcher.py` 는 기본적으로 TLS 인증서를 검증한다(`CRAWLER_VERIFY_TLS`, 기본 True). 특정 사이트의 인증서 체인 문제로만 `CRAWLER_VERIFY_TLS=False` 로 임시 완화한다 — 완화 시 MITM 으로 주입된 HTML 이 저장·LLM·알림까지 흐를 수 있으니 프로덕션에서는 True 를 유지한다.
 - 동일성은 `(source_id, url)` 유니크로 판정한다 — 같은 사이트의 같은 URL 은 재크롤해도 중복으로 처리된다.

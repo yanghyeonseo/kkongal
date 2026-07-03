@@ -38,7 +38,7 @@ python manage.py classify_notices --dry-run        # 쓰지 않고 집계만
 
 ## 유의사항
 
-- **비용 최소화(NFR-6)**: 보강은 공지당 1회, 선별은 `(공지,사용자)` 쌍당 1회만 LLM 을 부른다. 이미 AI 로 판정된 쌍은 `--reclassify` 없이는 재호출하지 않는다. 반면 크롤러의 순진한 매처가 남긴 `reason == "Keyword match"` 행은 아직 미판정으로 보고 AI 가 덮어쓴다.
+- **비용 최소화(NFR-6)**: 보강은 공지당 1회, 선별은 `(공지,사용자)` 쌍당 1회만 LLM 을 부른다. **LLM 이 실제로 판정한** 보강/선별(`enriched_by_llm`·`classified_by_llm`)만 '확정'으로 보고 `--reclassify`·`force` 없이는 재호출하지 않는다. 반면 크롤러의 순진한 매처가 남긴 행과 **키워드 폴백** 행(둘 다 `*_by_llm=False`)은 아직 미확정으로 보고, LLM 이 살아나면 다시 판정해 덮어쓴다(폴백 고착 방지 — 일시 장애로 남은 저품질 결과가 영구 고정되지 않는다).
 - **`notified_at` 불가침**: 선별 upsert 는 `update_or_create` 의 defaults 에 `notified_at` 을 넣지 않아 알림 계층 소유 필드를 절대 건드리지 않는다.
 - **폴백 안전(3단 캐스케이드)**: `LLM_API_KEY` 가 비면 결정론적 키워드 매칭으로 동작한다. 키가 있으면 1차(`LLM_MODEL`)→2차(`LLM_FALLBACK_MODEL`) 순으로 시도하고, **두 LLM 계층이 모두 실패**(429/할당량 등)할 때만 키워드 폴백으로 내려가며 배너 플래그(`status.py`, `reason='quota'`)를 남긴다. 2차(Gemma급)가 응답하는 동안에는 배너가 뜨지 않는다. 상태 캐시는 프로세스 지역(LocMemCache)이라 동기화 버튼을 누른 같은 웹 프로세스의 배너에 바로 반영된다.
 - **요청 스로틀(RPM 방어)**: 프로세스 내 모든 LLM 요청 사이에 최소 간격(`LLM_MIN_REQUEST_INTERVAL_SECONDS`, 기본 4.5초)을 강제해 무료 티어 분당 한도(~15 RPM)를 넘지 않게 한다(스레드 안전 전역 시계). 테스트는 `min_interval=0` 으로 두어 실제 대기가 없다.

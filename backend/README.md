@@ -2,7 +2,7 @@
 
 ## 개요
 
-꽁알꽁알 백엔드는 **Django 6 + Django REST Framework** 기반의 API 서버로, 공지 수집부터 AI 선별, 멀티채널 알림까지의 파이프라인을 오케스트레이션한다. 기능은 여섯 개의 앱으로 나뉜다 — 계정·관심사(`account`), 출처·구독(`sources`), 공지 원본·공지함(`notices`), 수집(`crawler`), LLM 보강·선별(`ai`), 알림 발송(`alert`). 인증은 SimpleJWT 를 쓰되 프론트의 쿠키 흐름에 맞춰 `access_token` 쿠키도 읽는다. 데이터베이스는 개발 편의를 위해 SQLite 이며, 비밀 값과 외부 연동(LLM·SMTP)은 모두 `.env` 로 관리한다.
+꽁알꽁알 백엔드는 **Django 6 + Django REST Framework** 기반의 API 서버로, 공지 수집부터 AI 선별, 멀티채널 알림까지의 파이프라인을 오케스트레이션한다. 기능은 여섯 개의 앱으로 나뉜다 — 계정·관심사(`account`), 출처·구독(`sources`), 공지 원본·공지함(`notices`), 수집(`crawler`), LLM 보강·선별(`ai`), 알림 발송(`alert`). 인증은 SimpleJWT 를 쓰되 프론트의 쿠키 흐름에 맞춰 HttpOnly `access_token` 쿠키도 읽는다(기본 권한은 `IsAuthenticated`). 데이터베이스는 개발은 SQLite, 배포는 `DATABASE_URL`(RDS PostgreSQL)로 전환하며, 비밀 값과 외부 연동(LLM·SMTP)은 모두 `.env` 로 관리한다. 배포 절차는 [docs/DEPLOY.md](../docs/DEPLOY.md) 를 참고한다.
 
 ## 구성
 
@@ -68,4 +68,4 @@ python manage.py dispatch_alerts
 - `.env` 는 절대 커밋하지 않는다(`.env.example` 참고). 핵심 값: `SECRET_KEY`, `LLM_API_KEY`(선택), 이메일 `EMAIL_*`, `FRONTEND_URL`. 슬랙 Webhook 은 서버 설정이 아니라 사용자별로 웹 UI 에서 등록한다.
 - **AI 선별은 관리 명령/서비스(ORM)로 동작**하며 별도 HTTP 계약을 두지 않는다. 외부에 노출되는 AI 엔드포인트는 프론트 배너용 `GET /api/ai/status/` 하나뿐이다.
 - 별도의 데모 시드 명령은 없다. 테스트는 각 앱이 필요한 객체를 직접 만들어 검증한다.
-- DB 는 SQLite(`db.sqlite3`)이고 스케줄러는 관리 명령 루프(`run_scheduler`)로 구현돼 있다 — 별도 브로커/워커가 필요 없다.
+- DB 는 개발 편의상 SQLite(`db.sqlite3`)이며, 배포는 `DATABASE_URL` 로 PostgreSQL(RDS)을 쓴다(코드는 순수 ORM 이라 엔진 전환에 추가 작업 없음). 주기 파이프라인은 개발에선 `run_scheduler` 루프, 배포에선 systemd 타이머가 `run_pipeline` 을 주기 실행한다(→ `docs/DEPLOY.md`).
