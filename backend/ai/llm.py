@@ -25,6 +25,7 @@ import httpx
 from django.conf import settings
 
 from .prompts import build_enrichment_messages, build_messages
+from .status import mark_degraded, mark_ok
 
 logger = logging.getLogger("ai")
 
@@ -269,8 +270,13 @@ class LLMClient:
                     time.sleep(_RETRY_BACKOFF * (attempt + 1))
                     continue
                 break
+            # 429(사용량/레이트리밋)로 폴백 전환 → 프론트 배너용 상태 플래그.
+            if response.status_code == 429:
+                mark_degraded("quota")
             response.raise_for_status()
             body = response.json()
+            # 성공 호출은 소진 상태를 해제한다.
+            mark_ok()
 
         content_text = body["choices"][0]["message"]["content"]
         return extract_json(content_text)

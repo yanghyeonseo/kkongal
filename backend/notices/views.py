@@ -2,12 +2,13 @@ from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from account.models import Interest
+from ai.status import get_status
 from sources.models import SourceSubscription
 
 from .models import InboxNotice, Notice
@@ -156,6 +157,19 @@ class InboxNoticeReadView(APIView):
 
         response_serializer = InboxNoticeSerializer(inbox_notice)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class AiStatusView(APIView):
+    # 프론트 배너용 AI 가용 상태(정상/사용량 소진/키 미설정). 민감정보 없음 → 공개.
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="AI 가용 상태 조회",
+        description="AI 선별의 현재 상태를 반환합니다. degraded=true 면 키워드 기반 폴백 동작 중.",
+        responses={200: dict},
+    )
+    def get(self, request):
+        return Response(get_status(), status=status.HTTP_200_OK)
 
 
 class AiNoticeListView(APIView):

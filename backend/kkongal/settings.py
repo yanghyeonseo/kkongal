@@ -217,8 +217,14 @@ EMAIL_BACKEND = env(
 EMAIL_HOST = env('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = env.int('EMAIL_PORT', default=587)
 EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+# 465(SSL) 지원. 일부 네트워크는 587(STARTTLS) 핸드셰이크가 막혀 타임아웃 나므로,
+# 그럴 땐 .env 에서 EMAIL_PORT=465 · EMAIL_USE_SSL=True · EMAIL_USE_TLS=False 로 전환.
+EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=False)
+# TLS(587)와 SSL(465)은 동시에 켤 수 없다 — SSL 이 켜지면 TLS 를 끈다(Django 요구사항).
+if EMAIL_USE_SSL:
+    EMAIL_USE_TLS = False
 # SMTP 연결이 멈춰도 요청이 무한 대기하지 않도록 타임아웃(초)을 둔다.
-EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=10)
+EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=20)
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = env(

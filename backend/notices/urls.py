@@ -4,6 +4,7 @@ from .views import (
     AiInboxNoticeCreateView,
     AiNoticeCandidateListView,
     AiNoticeListView,
+    AiStatusView,
     InboxNoticeDetailView,
     InboxNoticeListView,
     InboxNoticeReadView,
@@ -21,6 +22,7 @@ urlpatterns = [
 ]
 
 ai_urlpatterns = [
+    path("status/", AiStatusView.as_view()),
     path("notices/", AiNoticeListView.as_view()),
     path("notices/<int:notice_id>/candidates/", AiNoticeCandidateListView.as_view()),
     path("inbox-notices/", AiInboxNoticeCreateView.as_view()),
