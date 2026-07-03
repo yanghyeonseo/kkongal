@@ -3,8 +3,8 @@ import "./App.css";
 
 import Header from "./components/Header.jsx";
 import Sidebar from "./components/Sidebar.jsx";
-import AiRecommendBox from "./components/AiRecommendBox.jsx";
 import NoticeCard from "./components/NoticeCard.jsx";
+import NoticeDetailModal from "./components/NoticeDetailModal.jsx";
 import SiteRegisterModal from "./components/SiteRegisterModal.jsx";
 import InterestSettingModal from "./components/InterestSettingModal.jsx";
 import AlertSettingsModal from "./components/AlertSettingsModal.jsx";
@@ -13,7 +13,7 @@ import Landing from "./components/Landing.jsx";
 import OnboardingWizard from "./components/OnboardingWizard.jsx";
 
 import { getMyInboxNotices, toggleInboxNoticeSave } from "./api/inboxApi.js";
-import { getNoticeSources, syncSource } from "./api/sourceApi.js";
+import { getNoticeSources, syncSource, updateSourceName } from "./api/sourceApi.js";
 import { getMyInterests } from "./api/interestApi.js";
 import {
   saveStoredUser,
@@ -36,6 +36,7 @@ const VIEW_TITLES = {
 const CATEGORY_FILTERS = [
   { id: "all", label: "전체" },
   { id: "deadline", label: "마감임박" },
+  { id: "expired", label: "마감" },
 ];
 
 const NOTICES_PER_PAGE = 5;
@@ -54,8 +55,10 @@ function App() {
 
   const [selectedView, setSelectedView] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedInterests, setSelectedInterests] = useState([]);
   const [activeSourceIds, setActiveSourceIds] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedNoticeId, setSelectedNoticeId] = useState(null);
 
   const [isSiteRegisterOpen, setIsSiteRegisterOpen] = useState(false);
   const [isInterestSettingOpen, setIsInterestSettingOpen] = useState(false);
@@ -125,7 +128,7 @@ function App() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedView, selectedCategory, activeSourceIds, searchQuery]);
+  }, [selectedView, selectedCategory, selectedInterests, activeSourceIds, searchQuery]);
 
   const handleOpenAuth = (mode) => setAuthMode(mode);
 
@@ -251,6 +254,7 @@ function App() {
     [toast],
   );
 
+  // 카드 클릭 → 상세 모달을 열고, 여는 즉시 읽음 처리(안 읽음 점 사라짐).
   const handleOpenNotice = (notice) => {
     setNotices((prev) =>
       prev.map((item) =>
@@ -259,7 +263,61 @@ function App() {
           : item,
       ),
     );
-    window.open(notice.url, "_blank", "noopener,noreferrer");
+    setSelectedNoticeId(notice.inboxNoticeId);
+  };
+
+  // 표시명 인라인 편집. 낙관적 갱신 후 실패 시 이전 이름으로 되돌린다.
+  const handleRenameSource = useCallback(
+    async (sourceId, name) => {
+      const target = sources.find((source) => source.id === sourceId);
+      const prevName = target ? target.displayName : name;
+
+      const applyName = (nextName) => {
+        setSources((prev) =>
+          prev.map((source) =>
+            source.id === sourceId
+              ? { ...source, name: nextName, displayName: nextName }
+              : source,
+          ),
+        );
+        setNotices((prev) =>
+          prev.map((notice) =>
+            notice.sourceId === sourceId
+              ? { ...notice, sourceName: nextName, sourceDisplayName: nextName }
+              : notice,
+          ),
+        );
+      };
+
+      applyName(name);
+      try {
+        const updated = await updateSourceName(sourceId, name);
+        const finalName = updated.name || name;
+        applyName(finalName);
+        if (updated.faviconUrl) {
+          setSources((prev) =>
+            prev.map((source) =>
+              source.id === sourceId
+                ? { ...source, faviconUrl: updated.faviconUrl }
+                : source,
+            ),
+          );
+        }
+        toast.success("사이트 이름을 변경했어요.");
+      } catch (error) {
+        applyName(prevName);
+        toast.error(error.message || "이름 변경에 실패했어요.");
+      }
+    },
+    [sources, toast],
+  );
+
+  const handleToggleInterest = (keyword) => {
+    setSelectedInterests((prev) =>
+      prev.includes(keyword)
+        ? prev.filter((item) => item !== keyword)
+        : [...prev, keyword],
+    );
   };
 
   const handleToggleSave = async (inboxNoticeId) => {
@@ -317,10 +375,22 @@ function App() {
         ? notices
         : sourceFilteredNotices;
 
+    const activeInterests = selectedInterests.map((keyword) => keyword.toLowerCase());
+
     return base.filter((notice) => {
       if (selectedView === "ai" && !isAiMatched(notice)) return false;
       if (selectedView === "saved" && !notice.isSaved) return false;
       if (selectedCategory === "deadline" && !notice.isDeadlineSoon) return false;
+      if (selectedCategory === "expired" && !notice.isExpired) return false;
+
+      // 관심사별 매칭: 선택한 관심 키워드 중 하나라도 matched_keywords 와 겹치면 통과(OR).
+      if (activeInterests.length > 0) {
+        const tags = (notice.matchedInterestTags || []).map((tag) => tag.toLowerCase());
+        const hit = activeInterests.some((keyword) =>
+          tags.some((tag) => tag.includes(keyword) || keyword.includes(tag)),
+        );
+        if (!hit) return false;
+      }
 
       if (query) {
         const haystack = [
@@ -336,7 +406,14 @@ function App() {
 
       return true;
     });
-  }, [notices, sourceFilteredNotices, selectedView, selectedCategory, searchQuery]);
+  }, [
+    notices,
+    sourceFilteredNotices,
+    selectedView,
+    selectedCategory,
+    selectedInterests,
+    searchQuery,
+  ]);
 
   const totalPages = Math.ceil(filteredNotices.length / NOTICES_PER_PAGE) || 1;
   const paginatedNotices = useMemo(() => {
@@ -346,6 +423,12 @@ function App() {
 
   // 헤드라인 수치는 항상 실제로 보여주는 카드 수와 일치시킨다.
   const headlineCount = filteredNotices.length;
+
+  // 상세 모달은 notices 에서 파생 — 저장 토글 등 갱신이 모달에 즉시 반영된다.
+  const selectedNotice = useMemo(
+    () => notices.find((notice) => notice.inboxNoticeId === selectedNoticeId) || null,
+    [notices, selectedNoticeId],
+  );
 
   const renderNoticeArea = () => {
     if (dashboardLoading) {
@@ -467,15 +550,10 @@ function App() {
             syncingSourceIds={syncingSourceIds}
             onSyncSource={handleSyncSource}
             onSyncAll={handleSyncAll}
+            onRenameSource={handleRenameSource}
           />
 
           <main className="main">
-            <AiRecommendBox
-              notices={sourceFilteredNotices}
-              interests={interests}
-              onOpenNotice={handleOpenNotice}
-            />
-
             <section className="noticeSection">
               <div className="noticeTitleRow">
                 <div>
@@ -499,7 +577,41 @@ function App() {
                 </div>
               </div>
 
-              <div className="viewFade" key={`${selectedView}-${selectedCategory}`}>
+              {interests.length > 0 && (
+                <div className="interestFilterRow">
+                  <span className="interestFilterLabel">관심사</span>
+                  <div className="interestFilterChips">
+                    {interests.map((interest) => {
+                      const active = selectedInterests.includes(interest.keyword);
+                      return (
+                        <button
+                          key={interest.id}
+                          type="button"
+                          className={`interestFilterChip ${active ? "active" : ""}`}
+                          aria-pressed={active}
+                          onClick={() => handleToggleInterest(interest.keyword)}
+                        >
+                          {interest.keyword}
+                        </button>
+                      );
+                    })}
+                    {selectedInterests.length > 0 && (
+                      <button
+                        type="button"
+                        className="interestFilterClear"
+                        onClick={() => setSelectedInterests([])}
+                      >
+                        초기화
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div
+                className="viewFade"
+                key={`${selectedView}-${selectedCategory}-${selectedInterests.join(",")}`}
+              >
                 {renderNoticeArea()}
               </div>
 
@@ -532,6 +644,14 @@ function App() {
   return (
     <>
       {content}
+
+      {selectedNotice && (
+        <NoticeDetailModal
+          notice={selectedNotice}
+          onClose={() => setSelectedNoticeId(null)}
+          onToggleSave={handleToggleSave}
+        />
+      )}
 
       {isSiteRegisterOpen && currentUser && (
         <SiteRegisterModal

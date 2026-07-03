@@ -36,17 +36,18 @@ function parseMatchedKeywords(value) {
   return [];
 }
 
-function getIsDeadlineSoon(deadlineAt) {
-  if (!deadlineAt) return false;
+// 마감까지 남은 일수. 없으면 null.
+function daysUntilDeadline(deadlineAt) {
+  if (!deadlineAt) return null;
 
   const today = new Date();
   const deadline = new Date(deadlineAt);
+  if (Number.isNaN(deadline.getTime())) return null;
 
   today.setHours(0, 0, 0, 0);
   deadline.setHours(0, 0, 0, 0);
 
-  const diffDays = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
-  return diffDays >= 0 && diffDays <= 7;
+  return Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
 }
 
 function normalizeInboxNotice(item) {
@@ -56,6 +57,8 @@ function normalizeInboxNotice(item) {
   const deadlineAt = item.deadline_at ?? notice.deadline_at ?? null;
   const sourceName =
     (source.name && source.name.trim()) || displayNameFromUrl(notice.url);
+  const content = notice.content ?? "";
+  const daysLeft = daysUntilDeadline(deadlineAt);
 
   return {
     inboxNoticeId: item.id,
@@ -64,9 +67,13 @@ function normalizeInboxNotice(item) {
     sourceId: notice.source_id ?? source.id,
     sourceName,
     sourceDisplayName: sourceName,
+    sourceFaviconUrl: source.favicon_url ?? "",
 
     title: notice.title ?? "",
-    description: (notice.content ?? "").slice(0, 90),
+    content,
+    description: content.slice(0, 90),
+    summary: notice.summary ?? "",
+    contentMarkdown: notice.content_markdown ?? "",
     url: notice.url ?? "",
     publisher: notice.publisher ?? "",
 
@@ -79,7 +86,9 @@ function normalizeInboxNotice(item) {
 
     isRead: item.is_read ?? false,
     isSaved: item.is_saved ?? false,
-    isDeadlineSoon: getIsDeadlineSoon(deadlineAt),
+    // 마감 상태는 deadline_at 기준으로 계산: 임박(0~7일) / 지남(음수).
+    isDeadlineSoon: daysLeft !== null && daysLeft >= 0 && daysLeft <= 7,
+    isExpired: daysLeft !== null && daysLeft < 0,
   };
 }
 

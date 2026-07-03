@@ -25,12 +25,13 @@ export async function createAlertChannel({ type, config, isActive = true }) {
     body: JSON.stringify({ type, config, is_active: isActive }),
   });
   const channel = normalizeChannel(data);
-  // 채널 생성 직후 백엔드가 확인 메시지를 발송하고 결과를 함께 내려준다.
-  // { confirmation: { ok, error } } — 발송 실패해도 채널 생성 자체는 성공.
+  // 채널 생성 시 확인 메시지 발송은 백그라운드 best-effort 다(응답은 즉시 201).
+  // { confirmation: { ok, error, pending } } — ok=true 는 "수락/시도 중"이지 "전달 완료"가 아님.
   if (data && typeof data === "object" && data.confirmation) {
     channel.confirmation = {
       ok: data.confirmation.ok !== false,
       error: data.confirmation.error ?? "",
+      pending: data.confirmation.pending === true,
     };
   }
   return channel;
@@ -69,6 +70,10 @@ export async function testAlertChannel(channelId) {
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       return { ok: false, error: "테스트 전송 기능이 아직 준비되지 않았어요." };
+    }
+    // 테스트 발송은 사용자당 rate-limit 이 걸려 있다(429). 친절한 안내로 대체한다.
+    if (error instanceof ApiError && error.status === 429) {
+      return { ok: false, error: "잠시 후 다시 시도해 주세요." };
     }
     return { ok: false, error: error.message || "테스트 전송에 실패했어요." };
   }

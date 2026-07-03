@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Check, Loader2, RefreshCw } from "lucide-react";
 import { getSourceCatalog } from "../api/sourceApi.js";
+import SourceFavicon from "./SourceFavicon.jsx";
 
 const CATEGORY_LABELS = {
   all: "전체",
@@ -13,23 +14,6 @@ const CATEGORY_LABELS = {
   culture: "문화",
   etc: "기타",
 };
-
-const LOGO_COLORS = [
-  "#1677f2",
-  "#ef2b55",
-  "#ff6b2c",
-  "#4f46e5",
-  "#0ea5e9",
-  "#10b981",
-  "#f59e0b",
-  "#8b5cf6",
-];
-
-function logoColor(name) {
-  let hash = 0;
-  for (let i = 0; i < (name || "").length; i += 1) hash += name.charCodeAt(i);
-  return LOGO_COLORS[hash % LOGO_COLORS.length];
-}
 
 /**
  * 지원 사이트 카탈로그 그리드.
@@ -138,13 +122,13 @@ function SiteCatalog({ isSubscribed, onToggle }) {
               key={item.url}
               className={`catalogItem ${subscribed ? "subscribed" : ""}`}
             >
-              <span
+              <SourceFavicon
+                name={item.name}
+                faviconUrl={item.faviconUrl}
+                size={40}
+                rounded="12px"
                 className="catalogLogo"
-                style={{ background: logoColor(item.name) }}
-                aria-hidden="true"
-              >
-                {item.name.slice(0, 1)}
-              </span>
+              />
               <div className="catalogInfo">
                 <strong>{item.name}</strong>
                 <span className="catalogCat">

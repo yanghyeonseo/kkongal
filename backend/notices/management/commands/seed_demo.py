@@ -96,12 +96,23 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("reset: cleared demo interests + notices"))
 
         # sources + subscriptions
+        from sources.naming import favicon_url_for
+
         sources: list[NoticeSource] = []
         for name, url in DEMO_SOURCES:
-            src, _ = NoticeSource.objects.get_or_create(url=url, defaults={"name": name})
+            src, _ = NoticeSource.objects.get_or_create(
+                url=url,
+                defaults={"name": name, "favicon_url": favicon_url_for(url)},
+            )
+            changed = []
             if not src.name:
                 src.name = name
-                src.save(update_fields=["name"])
+                changed.append("name")
+            if not src.favicon_url:
+                src.favicon_url = favicon_url_for(url)
+                changed.append("favicon_url")
+            if changed:
+                src.save(update_fields=changed)
             sources.append(src)
             SourceSubscription.objects.get_or_create(user_id=user, source_id=src)
         self.stdout.write(self.style.SUCCESS(f"sources+subscriptions: {len(sources)}"))

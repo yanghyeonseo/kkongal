@@ -13,7 +13,7 @@ function displayNameFromUrl(url) {
 }
 
 // 백엔드 SourceSubscriptionSerializer:
-// { id, user_id, source_id, source: { id, name, url, crawl_interval_minutes, ... } }
+// { id, user_id, source_id, source: { id, name, url, favicon_url, crawl_interval_minutes, ... } }
 function normalizeSource(item) {
   const source = item.source || item;
   const url = source.url ?? "";
@@ -25,6 +25,7 @@ function normalizeSource(item) {
     name,
     displayName: name,
     url,
+    faviconUrl: source.favicon_url ?? "",
     isSubscribed: true,
   };
 }
@@ -49,6 +50,25 @@ export async function deleteSourceSubscription(subscriptionId) {
   });
 }
 
+// 표시명 편집: PATCH /api/sources/{id}/ { name } → 갱신된 source 반환.
+// 응답은 subscription wrapper 가 아닌 bare source 일 수 있어 방어적으로 파싱한다.
+export async function updateSourceName(sourceId, name) {
+  const data = await apiRequest(`/api/sources/${sourceId}/`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  const source = (data && (data.source || data)) || {};
+  const url = source.url ?? "";
+  const nextName = (source.name && source.name.trim()) || name || displayNameFromUrl(url);
+  return {
+    id: source.id ?? sourceId,
+    name: nextName,
+    displayName: nextName,
+    url,
+    faviconUrl: source.favicon_url ?? "",
+  };
+}
+
 // 지원 사이트 카탈로그: config 기반 목록.
 // 백엔드: [{ name, url, category, subscribed: bool, source_id: int|null }]
 function normalizeCatalogItem(item) {
@@ -60,6 +80,7 @@ function normalizeCatalogItem(item) {
     category: item.category ?? "etc",
     subscribed: item.subscribed ?? false,
     sourceId: item.source_id ?? null,
+    faviconUrl: item.favicon_url ?? "",
   };
 }
 

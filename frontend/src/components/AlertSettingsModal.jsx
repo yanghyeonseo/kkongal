@@ -41,7 +41,8 @@ function AlertSettingsModal({ currentUser, onClose }) {
     if (!confirmation) {
       toast.success(`${label} 알림 채널을 추가했어요.`);
     } else if (confirmation.ok) {
-      toast.success(`${label} 채널을 연동했어요 · 확인 메시지를 보냈어요.`);
+      // 확인 메시지는 백그라운드 발송 → "완료"가 아니라 "보내는 중"으로 안내한다.
+      toast.success(`${label} 채널이 추가됐어요 · 확인 메시지를 보내고 있어요.`);
     } else {
       toast.info(`${label} 채널을 추가했어요. 확인 메시지 발송은 실패했어요.`);
     }

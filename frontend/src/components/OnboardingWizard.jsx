@@ -186,7 +186,7 @@ function OnboardingWizard({ user, onComplete }) {
     if (!status || status === "busy") return null;
     return status.ok ? (
       <span className="onbChannelStatus ok">
-        <CheckCircle2 size={15} /> 연동됐어요 · 확인 메시지를 보냈어요
+        <CheckCircle2 size={15} /> 연동됐어요 · 확인 메시지를 보내고 있어요
       </span>
     ) : (
       <span className="onbChannelStatus warn">

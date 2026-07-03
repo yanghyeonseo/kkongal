@@ -53,6 +53,16 @@ export function isToday(dateString) {
     targetDate.getDate() === today.getDate()
   );
 }
+// 절대 날짜 표기(YYYY.M.D). 잘못된 값이면 빈 문자열.
+export function formatDate(dateString) {
+  if (!dateString) return "";
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+}
+
 export function calculateDday(deadlineAt) {
   if (!deadlineAt) {
     return null;

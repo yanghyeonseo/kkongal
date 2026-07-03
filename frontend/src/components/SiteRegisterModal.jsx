@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Plus, Loader2 } from "lucide-react";
 import ModalShell from "./ModalShell.jsx";
 import SiteCatalog from "./SiteCatalog.jsx";
 import { useToast } from "../context/toast.js";
@@ -20,6 +22,9 @@ function SiteRegisterModal({
   onSyncSource,
 }) {
   const toast = useToast();
+
+  const [url, setUrl] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const isSubscribed = (item) =>
     sources.some((source) => matchesCatalog(source, item));
@@ -49,6 +54,30 @@ function SiteRegisterModal({
     }
   };
 
+  // 지원 목록에 없는 사이트를 URL 로 직접 등록한다(백엔드가 표시명·파비콘을 추정).
+  const handleAddByUrl = async (event) => {
+    event.preventDefault();
+    const value = url.trim();
+    if (!value) {
+      toast.error("사이트 URL을 입력해주세요.");
+      return;
+    }
+
+    const normalized = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    setAdding(true);
+    try {
+      const source = await createSourceSubscription({ url: normalized });
+      onSourceAdded?.(source);
+      toast.success(`'${source.displayName}' 구독을 시작했어요.`);
+      onSyncSource?.(source.id, { silentUnsupported: true });
+      setUrl("");
+    } catch (error) {
+      toast.error(error.message || "URL 등록에 실패했어요.");
+    } finally {
+      setAdding(false);
+    }
+  };
+
   const subscribedCount = sources.length;
 
   return (
@@ -56,8 +85,33 @@ function SiteRegisterModal({
       size="lg"
       onClose={onClose}
       title="사이트 등록"
-      subtitle="지원하는 사이트에서 골라 구독하면 새 공지를 자동으로 모아드려요."
+      subtitle="지원하는 사이트에서 골라 구독하거나, URL로 직접 등록하세요."
     >
+      <form className="urlRegisterForm" onSubmit={handleAddByUrl}>
+        <label className="urlRegisterLabel" htmlFor="siteUrlInput">
+          직접 URL로 등록
+        </label>
+        <div className="urlRegisterRow">
+          <input
+            id="siteUrlInput"
+            className="urlRegisterInput"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="예: https://example.com/notice"
+            aria-label="등록할 사이트 URL"
+          />
+          <button type="submit" className="primaryButton" disabled={adding}>
+            {adding ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
+            등록
+          </button>
+        </div>
+        <p className="urlRegisterHint">
+          지원 목록에 없는 사이트도 URL로 추가할 수 있어요.
+        </p>
+      </form>
+
+      <div className="registerDivider" />
+
       <div className="registerListHead">
         <span>지원 사이트</span>
         <strong>{subscribedCount}개 구독 중</strong>

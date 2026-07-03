@@ -21,6 +21,8 @@ class NoticeSerializer(serializers.ModelSerializer):
             "hash",
             "title",
             "content",
+            "summary",
+            "content_markdown",
             "publisher",
             "published_at",
             "deadline_at",
