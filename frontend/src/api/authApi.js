@@ -5,7 +5,7 @@ const USER_STORAGE_KEY = "kkongal_user";
 // 백엔드 UserSerializer 응답을 프론트에서 쓰는 형태로 정규화한다.
 // 백엔드는 username 으로 인증하고 email 은 알림용으로 따로 저장한다.
 // 표시용 이름(name)은 username 을 사용한다(별도 name 필드가 없음).
-function normalizeUser(data, fallback = {}) {
+export function normalizeUser(data, fallback = {}) {
   const user = data ?? {};
 
   const name =
@@ -23,6 +23,10 @@ function normalizeUser(data, fallback = {}) {
     age: user.age ?? null,
     job: user.job ?? "",
     gender: user.gender ?? "",
+    // 고정 프로필 필드(나이/성별/지역/직업) + 자유서술(bio) catch-all.
+    // 도메인별 특화 정보는 ProfileAttribute(사용자 지정 커스텀 필드)로 분리됐다.
+    region: user.region ?? "",
+    bio: user.bio ?? "",
     // 온보딩 상태. 백엔드가 아직 필드를 안 내려주면(undefined) 위저드를 띄우지 않는다
     // (병렬 개발 안전장치). 명시적으로 false 일 때만 온보딩을 표시한다.
     onboarded: user.onboarded ?? fallback.onboarded ?? null,
@@ -51,6 +55,7 @@ export async function signup({
   age = null,
   job = "",
   gender = "",
+  region = "",
 }) {
   const body = { username, email, password };
 
@@ -60,6 +65,7 @@ export async function signup({
   }
   if (job) body.job = job;
   if (gender) body.gender = gender;
+  if (region) body.region = region;
 
   const data = await apiRequest("/api/account/signup/", {
     method: "POST",

@@ -5,6 +5,9 @@ from .views import (
     LogoutView,
     MeView,
     OnboardingCompleteView,
+    ProfileAttributeDetailView,
+    ProfileAttributeListView,
+    ProfileView,
     SignInView,
     SignUpView,
     TokenRefreshView,
@@ -18,6 +21,9 @@ urlpatterns = [
     path("logout/", LogoutView.as_view()),
     path("me/", MeView.as_view()),
     path("onboarding/complete/", OnboardingCompleteView.as_view()),
+    path("profile/", ProfileView.as_view()),
+    path("profile/attributes/", ProfileAttributeListView.as_view()),
+    path("profile/attributes/<int:attribute_id>/", ProfileAttributeDetailView.as_view()),
 ]
 
 interest_urlpatterns = [

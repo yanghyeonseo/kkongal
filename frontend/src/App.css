@@ -148,6 +148,9 @@ button:disabled {
 }
 
 .profileButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 48px;
   height: 48px;
 
@@ -155,9 +158,6 @@ button:disabled {
   border-radius: 50%;
   background: linear-gradient(135deg, #1976f3 0%, #6557ff 100%);
   color: white;
-
-  font-size: 16px;
-  font-weight: 900;
 }
 
 .profileMenu {
@@ -825,6 +825,220 @@ button:disabled {
 }
 
 /* =========================
+   Profile Setting Modal
+   ========================= */
+
+.profileSection {
+  padding: 20px;
+
+  border: 1px solid #e8eef6;
+  border-radius: 20px;
+  background: #fbfdff;
+}
+
+/* 2열 라벨 폼 — 좁은 화면에서 1열로 접힌다. 행/열 간격을 동일하게 둬 세로 리듬을 맞춘다. */
+.profileGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.profileField {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* 라벨 간격은 .profileField 의 gap 이 담당하므로 .formLabel 기본 여백은 제거한다. */
+.profileField .formLabel {
+  margin: 0;
+}
+
+.profileField input,
+.profileField select {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+
+  border: 1px solid #d8dee8;
+  border-radius: 16px;
+  outline: 0;
+  background: white;
+
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.profileField select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+
+  /* 커스텀 드롭다운 화살표(외부 에셋 없이 인라인 SVG). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236b7480' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.profileField input:focus,
+.profileField input:focus-visible,
+.profileField select:focus,
+.profileField select:focus-visible {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 242, 0.12);
+}
+
+.profileBioField {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.profileBioField .formLabel {
+  margin: 0;
+}
+
+.profileBioInput {
+  margin-top: 0;
+}
+
+@media (max-width: 560px) {
+  .profileGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 사용자 지정 필드(Section B) — 고정 필드 섹션 아래 별도 카드로 분리 */
+.profileAttrSection {
+  margin-top: 16px;
+}
+
+/* =========================
+   Profile Attribute Editor
+   (설정·온보딩 공용 커스텀 필드 편집기)
+   ========================= */
+
+.attrEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* label — value 한 줄 요약. .interestItem 레이아웃을 그대로 재사용한다. */
+.attrItemMain {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attrItemLabel {
+  color: var(--c-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+.attrItemSep {
+  color: var(--c-text-faint);
+  font-weight: 700;
+}
+.attrItemValue {
+  color: #7b8494;
+  font-size: 13.5px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.attrAddForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.attrInputRow {
+  display: flex;
+  gap: 8px;
+}
+.attrLabelInput,
+.attrValueInput {
+  height: 46px;
+  padding: 0 13px;
+  border: 1px solid #d8dee8;
+  border-radius: 14px;
+  outline: 0;
+  background: #fff;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.attrLabelInput {
+  flex: 0 0 34%;
+  min-width: 0;
+}
+.attrValueInput {
+  flex: 1;
+  min-width: 0;
+}
+.attrLabelInput:focus,
+.attrValueInput:focus {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 242, 0.12);
+}
+.attrAddBtn {
+  width: 48px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 14px;
+  background: var(--c-primary);
+  color: #fff;
+}
+.attrAddBtn:hover {
+  background: var(--c-primary-strong);
+}
+.attrAddBtn:disabled {
+  opacity: 0.65;
+}
+.attrCancelBtn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.attrCancelBtn:hover {
+  color: var(--c-text);
+}
+
+.attrSuggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attrSuggestChip {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--c-text-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.attrSuggestChip:hover {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+}
+
+/* =========================
    Auth Modal
    ========================= */
 
@@ -1072,10 +1286,6 @@ button:disabled {
 }
 
 .siteButton {
-  font-weight: 800;
-}
-
-.profileButton {
   font-weight: 800;
 }
 
@@ -3284,6 +3494,52 @@ button:disabled {
   border-color: var(--c-primary);
   box-shadow: 0 0 0 3px rgba(22, 119, 242, 0.12);
 }
+
+/* 온보딩 프로필 스텝 — 2열 라벨 폼(좁은 화면 1열), 세그먼트 버튼, 자유서술 textarea */
+.onbProfileGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+  margin-top: 6px;
+}
+.onbField {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+}
+.onbFieldFull {
+  grid-column: 1 / -1;
+  margin-top: 12px;
+}
+.onbFieldLabel {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--c-text-soft, #4a5361);
+}
+.onbTextarea {
+  height: auto;
+  min-height: 92px;
+  padding: 12px 15px;
+  line-height: 1.5;
+  resize: vertical;
+}
+@media (max-width: 560px) {
+  .onbProfileGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 온보딩 프로필 스텝 — 사용자 지정 추가필드 블록 래퍼 */
+.onbCustomFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e8eef6;
+}
+
 .onbConnectRow {
   display: flex;
   gap: 8px;

@@ -22,7 +22,7 @@ from typing import Optional
 
 from django.conf import settings
 
-from account.models import Interest
+from account.models import Interest, ProfileAttribute
 from notices.models import InboxNotice, Notice
 from sources.models import SourceSubscription
 
@@ -144,14 +144,22 @@ def _classify_pair(
             return
 
         summary.candidates += 1
+        # Category 2(사용자 지정) 커스텀 필드 — label/value 쌍 목록. 도메인마다 다르므로
+        # 고정 필드와 분리해 프롬프트의 '추가 정보' 섹션으로 렌더한다.
+        attributes = list(
+            ProfileAttribute.objects.filter(user_id=user).values("label", "value")
+        )
         verdict = client.classify(
             title=notice.title,
             content=notice.content,
             publisher=notice.publisher,
             profile={
                 "age": user.age,
-                "job": user.job,
                 "gender": user.gender,
+                "region": user.region,
+                "job": user.job,
+                "bio": user.bio,
+                "attributes": attributes,
             },
             interests=interests,
             # 보강 단계에서 만든 3문장 요약이 있으면 함께 실어 판단 품질↑·비용↓.
