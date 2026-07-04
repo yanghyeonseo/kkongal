@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import environ
 from datetime import timedelta
+import os
 
 # 테스트 실행 중인지 여부(스로틀을 끄는 등 테스트 전용 분기에 사용).
 TESTING = 'test' in sys.argv or 'pytest' in sys.modules
@@ -38,7 +39,7 @@ DEBUG = env('DEBUG')
 
 # 프로덕션에서는 ALLOWED_HOSTS 에 실제 도메인을 콤마로 나열한다(예: "kkongal.cloud").
 # DEBUG=False + 빈 목록이면 Django 가 모든 요청을 400 으로 막으므로 기본은 로컬 호스트.
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1', '15.164.24.120', 'kkongal.hs-yang.com', 'api.kkongal.hs-yang.com'])
 
 
 # Application definition
@@ -149,6 +150,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 # collectstatic 산출물 위치(nginx 또는 WhiteNoise 가 서빙). 배포 시 collectstatic 실행.
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 # 프로덕션에서만 해시 매니페스트+압축 스토리지 사용. DEBUG 에서는 매니페스트가 없어
@@ -194,10 +196,11 @@ SPECTACULAR_SETTINGS = {
 
 # 프로덕션에서 SPA 를 다른 오리진에서 서빙한다면 CORS_ALLOWED_ORIGINS 에 그 오리진을
 # 콤마로 나열한다. 권장 배포(nginx 동일 오리진)에서는 CORS 자체가 불필요하다.
-CORS_ALLOWED_ORIGINS = env.list(
-    'CORS_ALLOWED_ORIGINS',
-    default=['http://127.0.0.1:3000', 'http://localhost:3000'],
-)
+# CORS_ALLOWED_ORIGINS = env.list(
+#     'CORS_ALLOWED_ORIGINS',
+#     default=['http://127.0.0.1:3000', 'http://localhost:3000'],
+# )
+CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = (
     "accept",
