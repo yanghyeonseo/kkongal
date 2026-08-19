@@ -29,6 +29,6 @@ class InboxNoticeAdmin(admin.ModelAdmin):
         "is_read",
         "is_saved",
     )
-    search_fields = ("user_id__username", "notice_id__title", "matched_keywords", "reason")
+    search_fields = ("user_id__email", "notice_id__title", "matched_keywords", "reason")
     list_filter = ("is_read", "is_saved")
     ordering = ("-id",)

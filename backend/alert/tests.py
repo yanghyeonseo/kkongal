@@ -38,8 +38,15 @@ def make_slack_response(status_code=200, text="ok"):
 @override_settings(EMAIL_BACKEND=LOCMEM_EMAIL, LLM_RELEVANCE_THRESHOLD=0.5)
 class AlertTestBase(TestCase):
     def setUp(self):
+        # 이메일 인증을 마친 계정. 미인증 계정에는 알림 메일이 나가지 않으므로
+        # (service._dispatch_for_user), 발송 메커니즘을 검증하는 이 파일의 기본
+        # 사용자는 인증 완료 상태여야 한다. 게이트 자체는
+        # UnverifiedEmailGateTests 에서 따로 검증한다.
         self.user = User.objects.create_user(
-            username="alice", email="alice@example.com", password="pw12345!"
+            username="alice",
+            email="alice@example.com",
+            password="pw12345!",
+            email_verified=True,
         )
         self.source = NoticeSource.objects.create(
             name="서울대 공지", url="https://snu.example.com/notices"
@@ -415,7 +422,10 @@ class NoChannelTests(AlertTestBase):
 class UserScopingTests(AlertTestBase):
     def test_dispatch_can_target_single_user(self):
         other = User.objects.create_user(
-            username="bob", email="bob@example.com", password="pw12345!"
+            username="bob",
+            email="bob@example.com",
+            password="pw12345!",
+            email_verified=True,
         )
         n1 = self.make_notice("https://snu.example.com/u/1")
         n2 = self.make_notice("https://snu.example.com/u/2")
@@ -726,3 +736,62 @@ class AlertChannelSerializerValidationTests(TestCase):
             data={"type": "email", "config": {"address": "user@example.com"}}
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+
+@override_settings(EMAIL_BACKEND=LOCMEM_EMAIL, LLM_RELEVANCE_THRESHOLD=0.5)
+class UnverifiedEmailGateTests(AlertTestBase):
+    """이메일 미인증 계정에는 알림 메일을 보내지 않는다.
+
+    로그인 ID 가 이메일이 되면서 오타난 주소로 가입하는 경우가 생기는데, 그대로
+    두면 남의 주소로 공지가 계속 나간다. 다만 '보류'이지 '폐기'가 아니어서,
+    인증을 마치면 다음 주기에 그대로 발송되어야 한다.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.user.email_verified = False
+        self.user.save(update_fields=["email_verified"])
+
+    def test_email_not_sent_to_unverified_user(self):
+        notice = self.make_notice("https://snu.example.com/g/1")
+        inbox = self.make_inbox(notice)
+        self.make_channel("email", config={})
+
+        summary = dispatch_pending()
+
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(summary["attempted"], 0)
+        # 발송하지 않았으므로 미발송으로 남아 다음 주기에 재시도되어야 한다.
+        inbox.refresh_from_db()
+        self.assertIsNone(inbox.notified_at)
+
+    def test_pending_notices_are_sent_after_verification(self):
+        notice = self.make_notice("https://snu.example.com/g/2")
+        inbox = self.make_inbox(notice)
+        self.make_channel("email", config={})
+
+        dispatch_pending()
+        self.assertEqual(len(mail.outbox), 0)
+
+        self.user.email_verified = True
+        self.user.save(update_fields=["email_verified"])
+
+        dispatch_pending()
+        self.assertEqual(len(mail.outbox), 1)
+        inbox.refresh_from_db()
+        self.assertIsNotNone(inbox.notified_at)
+
+    def test_slack_still_works_for_unverified_user(self):
+        """게이트는 이메일 채널에만 걸린다 — 슬랙은 이메일 소유와 무관하다."""
+        notice = self.make_notice("https://snu.example.com/g/3")
+        inbox = self.make_inbox(notice)
+        self.make_channel(
+            "slack", config={"webhook_url": "https://hooks.slack.com/services/T/B/X"}
+        )
+
+        with mock.patch("httpx.post", return_value=make_slack_response()):
+            summary = dispatch_pending()
+
+        self.assertEqual(summary["sent"], 1)
+        inbox.refresh_from_db()
+        self.assertIsNotNone(inbox.notified_at)

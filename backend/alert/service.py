@@ -106,11 +106,27 @@ def _dispatch_for_user(user_obj, inbox_notices, summary) -> None:
     # 실제 발송기가 있는 채널만 남긴다. kakao 등 미지원 타입(get_sender→None)만
     # 있으면 '활성 채널 없음' 과 동일하게 취급해 notified_at 을 건드리지 않는다
     # (그렇지 않으면 아무것도 못 보내고도 발송 완료로 처리되어 영영 재시도되지 않음).
+    # 이메일 인증을 마치지 않은 계정에는 메일을 보내지 않는다. 로그인 ID 가 이메일로
+    # 바뀌면서 오타난 주소로 가입하는 경우가 생기는데, 그대로 두면 남의 주소로 공지가
+    # 계속 나간다(스팸 신고 → 발송 도메인 평판 손상). 인증을 마치면 다음 주기에
+    # 자동으로 발송된다 — 아래에서 notified_at 을 건드리지 않으므로 유실되지 않는다.
+    email_blocked = False
     deliverable = []
     for channel in channels:
         sender = get_sender(channel)
-        if sender is not None:
-            deliverable.append((channel, sender))
+        if sender is None:
+            continue
+        if channel.type == "email" and not getattr(user_obj, "email_verified", False):
+            email_blocked = True
+            continue
+        deliverable.append((channel, sender))
+
+    if email_blocked:
+        logger.info(
+            "사용자 %s: 이메일 미인증 → 이메일 채널 발송 보류 (%d건)",
+            user_obj,
+            len(inbox_notices),
+        )
 
     if not deliverable:
         logger.info(

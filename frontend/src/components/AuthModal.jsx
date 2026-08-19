@@ -24,7 +24,6 @@ function evaluatePassword(pw) {
 
 function AuthModal({ initialMode, onClose, onAuthSuccess }) {
   const [mode, setMode] = useState(initialMode);
-  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -37,14 +36,14 @@ function AuthModal({ initialMode, onClose, onAuthSuccess }) {
 
   const pw = useMemo(() => evaluatePassword(password), [password]);
   const emailValid = EMAIL_RE.test(email);
+  // 로그인 화면에서는 형식 오류를 굳이 지적하지 않는다(어차피 서버가 거절한다).
   const emailError = !isLoginMode && email.length > 0 && !emailValid;
   const confirmError = !isLoginMode && confirm.length > 0 && confirm !== password;
 
-  const signupValid =
-    username.trim().length > 0 && emailValid && pw.valid && confirm === password;
+  const signupValid = emailValid && pw.valid && confirm === password;
 
   const canSubmit = isLoginMode
-    ? username.trim().length > 0 && password.length > 0
+    ? email.trim().length > 0 && password.length > 0
     : signupValid;
 
   const switchMode = (nextMode) => {
@@ -57,7 +56,7 @@ function AuthModal({ initialMode, onClose, onAuthSuccess }) {
     const payload = error?.payload;
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
       const next = {};
-      for (const key of ["username", "email", "password"]) {
+      for (const key of ["email", "password"]) {
         const value = payload[key];
         if (Array.isArray(value) && value.length > 0) next[key] = String(value[0]);
         else if (typeof value === "string") next[key] = value;
@@ -79,23 +78,23 @@ function AuthModal({ initialMode, onClose, onAuthSuccess }) {
 
     try {
       if (isLoginMode) {
-        await login({ username, password });
+        await login({ email, password });
       } else {
-        await signup({ username, email, password });
+        await signup({ email, password });
       }
 
       let user;
       try {
         user = await getCurrentUser();
       } catch {
-        user = { username, email, name: username };
+        user = { email, name: email.split("@")[0] };
       }
       onAuthSuccess(user);
     } catch (error) {
       applyServerErrors(
         error,
         isLoginMode
-          ? "로그인에 실패했어요. 아이디와 비밀번호를 확인해주세요."
+          ? "로그인에 실패했어요. 이메일과 비밀번호를 확인해주세요."
           : "회원가입에 실패했어요. 입력값을 다시 확인해주세요.",
       );
     } finally {
@@ -111,7 +110,7 @@ function AuthModal({ initialMode, onClose, onAuthSuccess }) {
       subtitle={
         isLoginMode
           ? "로그인하고 맞춤 공지를 확인하세요."
-          : "계정을 만들고 맞춤 공지를 받아보세요."
+          : "이메일로 가입하고 맞춤 공지를 받아보세요."
       }
     >
       <div className="authTabButtons" role="tablist" aria-label="로그인 또는 회원가입">
@@ -136,50 +135,33 @@ function AuthModal({ initialMode, onClose, onAuthSuccess }) {
       </div>
 
       <form className="authForm" onSubmit={handleSubmit} noValidate>
-        <label className={`authInputGroup ${fieldErrors.username ? "hasError" : ""}`}>
-          <span>아이디</span>
+        <label
+          className={`authInputGroup ${
+            fieldErrors.email || emailError ? "hasError" : ""
+          }`}
+        >
+          <span>이메일</span>
           <input
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="로그인에 사용할 아이디"
-            autoComplete="username"
-            aria-invalid={Boolean(fieldErrors.username)}
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder={
+              isLoginMode ? "가입한 이메일" : "공지 알림을 받을 이메일"
+            }
+            autoComplete="email"
+            aria-invalid={Boolean(fieldErrors.email || emailError)}
             required
           />
-          {fieldErrors.username && (
+          {fieldErrors.email ? (
             <p className="fieldError">
-              <AlertCircle size={13} /> {fieldErrors.username}
+              <AlertCircle size={13} /> {fieldErrors.email}
             </p>
-          )}
+          ) : emailError ? (
+            <p className="fieldError">
+              <AlertCircle size={13} /> 올바른 이메일 형식이 아니에요.
+            </p>
+          ) : null}
         </label>
-
-        {!isLoginMode && (
-          <label
-            className={`authInputGroup ${
-              fieldErrors.email || emailError ? "hasError" : ""
-            }`}
-          >
-            <span>이메일</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="공지 알림을 받을 이메일"
-              autoComplete="email"
-              aria-invalid={Boolean(fieldErrors.email || emailError)}
-              required
-            />
-            {fieldErrors.email ? (
-              <p className="fieldError">
-                <AlertCircle size={13} /> {fieldErrors.email}
-              </p>
-            ) : emailError ? (
-              <p className="fieldError">
-                <AlertCircle size={13} /> 올바른 이메일 형식이 아니에요.
-              </p>
-            ) : null}
-          </label>
-        )}
 
         <label className={`authInputGroup ${fieldErrors.password ? "hasError" : ""}`}>
           <span>비밀번호</span>

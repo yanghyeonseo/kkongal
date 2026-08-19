@@ -6,7 +6,7 @@ from .models import AlertChannel, AlertLog
 @admin.register(AlertChannel)
 class AlertChannelAdmin(admin.ModelAdmin):
     list_display = ("id", "user_id", "type", "is_active", "created_at")
-    search_fields = ("user_id__username", "user_id__email", "type")
+    search_fields = ("user_id__email", "user_id__nickname", "type")
     list_filter = ("type", "is_active", "created_at")
     ordering = ("-created_at", "-id")
 
@@ -21,7 +21,7 @@ class AlertLogAdmin(admin.ModelAdmin):
         "sent_at",
     )
     search_fields = (
-        "inbox_notice_id__user_id__username",
+        "inbox_notice_id__user_id__email",
         "inbox_notice_id__notice_id__title",
         "channel_id__type",
         "error",

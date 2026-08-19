@@ -3,23 +3,23 @@ import { apiRequest } from "./client.js";
 const USER_STORAGE_KEY = "kkongal_user";
 
 // 백엔드 UserSerializer 응답을 프론트에서 쓰는 형태로 정규화한다.
-// 백엔드는 username 으로 인증하고 email 은 알림용으로 따로 저장한다.
-// 표시용 이름(name)은 username 을 사용한다(별도 name 필드가 없음).
+// 로그인 ID 는 이메일이다. 백엔드의 username 은 이메일에서 자동 생성한 내부 식별자라
+// 응답에 실리지 않으며, 표시용 이름(name)은 nickname → 이메일 로컬파트 순으로 정한다.
 export function normalizeUser(data, fallback = {}) {
   const user = data ?? {};
 
-  const name =
-    user.username ??
-    fallback.username ??
-    fallback.name ??
-    user.email?.split("@")[0] ??
-    "사용자";
+  const email = user.email ?? fallback.email ?? "";
+  const nickname = user.nickname ?? fallback.nickname ?? "";
+  const name = nickname || email.split("@")[0] || "사용자";
 
   return {
     id: user.id ?? fallback.id ?? null,
-    username: user.username ?? fallback.username ?? name,
     name,
-    email: user.email ?? fallback.email ?? "",
+    nickname,
+    email,
+    // 이메일 인증 여부. 백엔드가 아직 필드를 안 내려주면(undefined) 인증 배너를
+    // 띄우지 않는다 — 명시적으로 false 일 때만 미인증으로 취급한다.
+    emailVerified: user.email_verified ?? fallback.emailVerified ?? null,
     age: user.age ?? null,
     job: user.job ?? "",
     gender: user.gender ?? "",
@@ -47,9 +47,8 @@ export async function getCurrentUser() {
   return normalizeUser(data);
 }
 
-// 회원가입: username + password 는 필수, email 은 알림에 필요, 나머지는 선택.
+// 회원가입: 이메일 + 비밀번호만 받는다. 닉네임은 온보딩 첫 단계에서 따로 묻는다.
 export async function signup({
-  username,
   email,
   password,
   age = null,
@@ -57,7 +56,7 @@ export async function signup({
   gender = "",
   region = "",
 }) {
-  const body = { username, email, password };
+  const body = { email, password };
 
   // 선택 프로필(AI 추천 정확도 향상용)은 값이 있을 때만 전송
   if (age !== null && age !== "" && !Number.isNaN(Number(age))) {
@@ -72,17 +71,33 @@ export async function signup({
     body: JSON.stringify(body),
   });
 
-  return normalizeUser(data, { username, email });
+  return normalizeUser(data, { email });
 }
 
-// 로그인: 백엔드는 username 으로 인증한다.
-export async function login({ username, password }) {
+// 로그인: 백엔드는 이메일로 인증한다.
+export async function login({ email, password }) {
   const data = await apiRequest("/api/account/signin/", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
 
-  return normalizeUser(data, { username });
+  return normalizeUser(data, { email });
+}
+
+// 메일 링크의 토큰으로 이메일 인증을 완료한다(로그인 없이도 호출 가능).
+export async function verifyEmail(token) {
+  return apiRequest("/api/account/verify-email/", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+// 인증 메일 재발송(로그인 상태에서 본인에게만).
+export async function resendVerificationEmail() {
+  return apiRequest("/api/account/verify-email/resend/", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 // 온보딩 완료: request.user.onboarded = True 후 user 반환.

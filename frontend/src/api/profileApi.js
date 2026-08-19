@@ -1,9 +1,10 @@
 import { apiRequest } from "./client.js";
 import { normalizeUser } from "./authApi.js";
 
-// 프로필(고정 필드 + 자유서술) 부분 갱신에 쓰이는 키 목록.
-// username/password/email/onboarded/created_at 은 이 엔드포인트로 못 바꾼다.
-const PROFILE_FIELDS = ["age", "job", "gender", "region", "bio"];
+// 프로필(표시 이름 + 고정 필드 + 자유서술) 부분 갱신에 쓰이는 키 목록.
+// username/password/email/onboarded/email_verified/created_at 은 이 엔드포인트로 못 바꾼다
+// (이메일은 로그인 ID 이자 인증 대상이라 여기서 바꾸면 인증 상태와 어긋난다).
+const PROFILE_FIELDS = ["nickname", "age", "job", "gender", "region", "bio"];
 
 // 프로필 부분 갱신: fields 에 존재하는 키만 payload 에 담는다(빈 문자열도 포함되어
 // 설정 모달에서 값을 명시적으로 비울 수 있다). age 는 숫자로 변환되며, 숫자가 아니면 null.

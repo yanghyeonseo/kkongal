@@ -4754,6 +4754,33 @@ a.primaryButton {
   background: rgba(15, 23, 42, 0.06);
 }
 
+/* 이메일 인증 배너의 "메일 다시 보내기" 버튼. 배너 색을 그대로 물려받는다. */
+.verifyResendBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease-out),
+    opacity var(--dur) var(--ease-out);
+}
+.verifyResendBtn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.06);
+}
+.verifyResendBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* =====================================================================
    Custom sites — catalog "커스텀" badge + "내가 추가한 사이트" management
    (site register modal; appended last, does not alter earlier rules)

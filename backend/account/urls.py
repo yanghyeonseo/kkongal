@@ -1,5 +1,7 @@
 from django.urls import path
 from .views import (
+    EmailVerifyResendView,
+    EmailVerifyView,
     InterestDetailView,
     InterestListView,
     LogoutView,
@@ -20,6 +22,8 @@ urlpatterns = [
     path("refresh/", TokenRefreshView.as_view()),
     path("logout/", LogoutView.as_view()),
     path("me/", MeView.as_view()),
+    path("verify-email/", EmailVerifyView.as_view()),
+    path("verify-email/resend/", EmailVerifyResendView.as_view()),
     path("onboarding/complete/", OnboardingCompleteView.as_view()),
     path("profile/", ProfileView.as_view()),
     path("profile/attributes/", ProfileAttributeListView.as_view()),
