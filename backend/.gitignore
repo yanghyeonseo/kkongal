@@ -173,3 +173,6 @@ cython_debug/
 #.idea/
 
 # End of https://www.toptal.com/developers/gitignore/api/django
+
+# filebased 이메일 백엔드 출력(디버그용)
+sent_emails/

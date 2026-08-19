@@ -301,6 +301,10 @@ if EMAIL_USE_SSL:  # TLS/SSL 동시 사용 불가
 EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=20)
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+# filebased.EmailBackend 용 출력 디렉터리. SMTP 없이 실제 메일 내용(인증 링크 등)을
+# 확인해야 할 때 EMAIL_BACKEND 를 filebased 로 바꾸고 이 경로를 지정한다.
+# Django 기본값이 None 이라 지정하지 않고 filebased 를 쓰면 발송이 실패한다.
+EMAIL_FILE_PATH = env('EMAIL_FILE_PATH', default=str(BASE_DIR / 'sent_emails'))
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='꽁알꽁알 <no-reply@kkongal.cloud>')
 
 # ── 슬랙 알림 ────────────────────────────────────────────────────────────────
