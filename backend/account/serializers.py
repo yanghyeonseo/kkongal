@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Interest
+from .models import Interest, ProfileAttribute
 
 
 User = get_user_model()
@@ -18,6 +18,8 @@ class UserSerializer(serializers.ModelSerializer):
             "age",
             "job",
             "gender",
+            "region",
+            "bio",
             "onboarded",
             "created_at",
         )
@@ -37,6 +39,19 @@ class InterestSerializer(serializers.ModelSerializer):
             "keyword",
             "description",
             "priority",
+            "created_at",
+        )
+        read_only_fields = ("id", "user_id", "created_at")
+
+
+class ProfileAttributeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProfileAttribute
+        fields = (
+            "id",
+            "user_id",
+            "label",
+            "value",
             "created_at",
         )
         read_only_fields = ("id", "user_id", "created_at")

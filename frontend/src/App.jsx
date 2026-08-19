@@ -9,6 +9,7 @@ import AiStatusBanner from "./components/AiStatusBanner.jsx";
 import NoticeDetailModal from "./components/NoticeDetailModal.jsx";
 import SiteRegisterModal from "./components/SiteRegisterModal.jsx";
 import InterestSettingModal from "./components/InterestSettingModal.jsx";
+import ProfileSettingModal from "./components/ProfileSettingModal.jsx";
 import AlertSettingsModal from "./components/AlertSettingsModal.jsx";
 import AuthModal from "./components/AuthModal.jsx";
 import Landing from "./components/Landing.jsx";
@@ -60,6 +61,7 @@ function App() {
 
   const [isSiteRegisterOpen, setIsSiteRegisterOpen] = useState(false);
   const [isInterestSettingOpen, setIsInterestSettingOpen] = useState(false);
+  const [isProfileSettingOpen, setIsProfileSettingOpen] = useState(false);
   const [isAlertSettingsOpen, setIsAlertSettingsOpen] = useState(false);
   const [authMode, setAuthMode] = useState(null);
 
@@ -544,6 +546,7 @@ function App() {
           onOpenAuth={handleOpenAuth}
           onOpenSiteRegister={() => setIsSiteRegisterOpen(true)}
           onOpenInterestSetting={() => setIsInterestSettingOpen(true)}
+          onOpenProfileSetting={() => setIsProfileSettingOpen(true)}
           onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
           onLogout={handleLogout}
         />
@@ -659,6 +662,18 @@ function App() {
           interests={interests}
           onClose={() => setIsInterestSettingOpen(false)}
           onInterestsChange={setInterests}
+        />
+      )}
+
+      {isProfileSettingOpen && (
+        <ProfileSettingModal
+          currentUser={currentUser}
+          onClose={() => setIsProfileSettingOpen(false)}
+          onSaved={(user) => {
+            const nextUser = { ...currentUser, ...user };
+            setCurrentUser(nextUser);
+            saveStoredUser(nextUser);
+          }}
         />
       )}
 

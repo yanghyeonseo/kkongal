@@ -15,8 +15,12 @@ from account.request_serializers import (
     TokenRefreshRequestSerializer,
     LogoutRequestSerializer,
 )
-from .models import Interest
-from .serializers import InterestSerializer, UserSerializer
+from .models import Interest, ProfileAttribute
+from .serializers import (
+    InterestSerializer,
+    ProfileAttributeSerializer,
+    UserSerializer,
+)
 
 User = get_user_model()
 
@@ -239,6 +243,54 @@ class OnboardingCompleteView(APIView):
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
+class ProfileView(APIView):
+    # 프로필 부분 수정. 화이트리스트 필드만 갱신하며 username/password/email/onboarded 는 못 바꾼다.
+    _EDITABLE_STR_FIELDS = (
+        "gender",
+        "job",
+        "region",
+        "bio",
+    )
+
+    @extend_schema(
+        summary="프로필 수정",
+        description="로그인한 사용자의 프로필(관심/제약 맥락 필드)을 부분 수정합니다.",
+        request=None,
+        responses={200: UserSerializer, 401: "Unauthorized"},
+    )
+    def patch(self, request):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        user = request.user
+        updated_fields = []
+
+        # 문자열 필드: 요청에 실제로 담긴 키만 갱신한다.
+        for field in self._EDITABLE_STR_FIELDS:
+            if field in request.data:
+                value = request.data.get(field)
+                setattr(user, field, "" if value is None else str(value))
+                updated_fields.append(field)
+
+        # age 는 빈 값이면 None, 아니면 int 로 강제 변환한다(변환 실패 시 무시).
+        if "age" in request.data:
+            raw_age = request.data.get("age")
+            if raw_age in (None, ""):
+                user.age = None
+                updated_fields.append("age")
+            else:
+                try:
+                    user.age = int(raw_age)
+                    updated_fields.append("age")
+                except (TypeError, ValueError):
+                    pass
+
+        if updated_fields:
+            user.save(update_fields=updated_fields)
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
+
 class InterestListView(APIView):
     @extend_schema(
         summary="관심사 목록 조회",
@@ -306,4 +358,76 @@ class InterestDetailView(APIView):
 
         interest = self.get_interest(request, interest_id)
         interest.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProfileAttributeListView(APIView):
+    @extend_schema(
+        summary="커스텀 프로필 필드 목록 조회",
+        description="로그인한 사용자의 사용자 지정 프로필 필드 목록을 최신순으로 조회합니다.",
+        responses={200: ProfileAttributeSerializer(many=True), 401: "Unauthorized"},
+    )
+    def get(self, request):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        attributes = ProfileAttribute.objects.filter(user_id=request.user).order_by(
+            "-created_at"
+        )
+        serializer = ProfileAttributeSerializer(attributes, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="커스텀 프로필 필드 생성",
+        description="로그인한 사용자의 사용자 지정 프로필 필드를 생성합니다.",
+        request=ProfileAttributeSerializer,
+        responses={201: ProfileAttributeSerializer, 400: "Bad Request", 401: "Unauthorized"},
+    )
+    def post(self, request):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        serializer = ProfileAttributeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        attribute = serializer.save(user_id=request.user)
+        return Response(
+            ProfileAttributeSerializer(attribute).data, status=status.HTTP_201_CREATED
+        )
+
+
+class ProfileAttributeDetailView(APIView):
+    def get_attribute(self, request, attribute_id):
+        return get_object_or_404(ProfileAttribute, id=attribute_id, user_id=request.user)
+
+    @extend_schema(
+        summary="커스텀 프로필 필드 수정",
+        description="로그인한 사용자의 사용자 지정 프로필 필드를 수정합니다.",
+        request=ProfileAttributeSerializer,
+        responses={200: ProfileAttributeSerializer, 400: "Bad Request", 401: "Unauthorized", 404: "Not Found"},
+    )
+    def put(self, request, attribute_id):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        attribute = self.get_attribute(request, attribute_id)
+        serializer = ProfileAttributeSerializer(attribute, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="커스텀 프로필 필드 삭제",
+        description="로그인한 사용자의 사용자 지정 프로필 필드를 삭제합니다.",
+        responses={204: "No Content", 401: "Unauthorized", 404: "Not Found"},
+    )
+    def delete(self, request, attribute_id):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        attribute = self.get_attribute(request, attribute_id)
+        attribute.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

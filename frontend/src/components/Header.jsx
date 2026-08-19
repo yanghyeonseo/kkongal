@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, X, Tag, BellRing, LogOut, Plus } from "lucide-react";
+import { Search, X, Tag, BellRing, LogOut, Plus, UserRound } from "lucide-react";
 import logo from "../assets/logo.png";
 
 function Header({
@@ -9,13 +9,12 @@ function Header({
   onOpenAuth,
   onOpenSiteRegister,
   onOpenInterestSetting,
+  onOpenProfileSetting,
   onOpenAlertSettings,
   onLogout,
 }) {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileRef = useRef(null);
-
-  const userInitial = currentUser?.name?.slice(0, 1) || "?";
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -84,7 +83,7 @@ function Header({
               aria-expanded={isProfileMenuOpen}
               aria-label="내 계정 메뉴"
             >
-              {userInitial}
+              <UserRound size={22} aria-hidden="true" />
             </button>
 
             {isProfileMenuOpen && (
@@ -93,6 +92,14 @@ function Header({
                   <strong>{currentUser.name}</strong>
                   <span>{currentUser.email || "이메일 미등록"}</span>
                 </p>
+
+                <button
+                  className="profileMenuButton"
+                  role="menuitem"
+                  onClick={() => runAndClose(onOpenProfileSetting)}
+                >
+                  <UserRound size={16} /> 내 정보 설정
+                </button>
 
                 <button
                   className="profileMenuButton"

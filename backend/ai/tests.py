@@ -24,6 +24,7 @@ from sources.models import NoticeSource, SourceSubscription
 from ai.enrich import enrich_notice, enrich_notices, parse_deadline
 from ai.llm import PROVIDER_FALLBACK, PROVIDER_LLM, LLMClient, extract_json
 from ai.prompts import build_messages
+from ai.prompts import _format_profile
 from ai.service import NAIVE_REASON, classify_notice, run_classification
 from ai.status import get_status
 
@@ -791,6 +792,69 @@ class BuildMessagesInterestTests(TestCase):
         for interest in interests:
             self.assertIn(interest["keyword"], user_prompt)
             self.assertIn(interest["description"], user_prompt)
+
+
+class FormatProfileUnitTests(TestCase):
+    """_format_profile: 고정 필드+bio+사용자 지정 추가 정보를 렌더하고 빈 값은 생략한다."""
+
+    def test_renders_populated_fields_and_omits_empty(self) -> None:
+        profile = {
+            "age": 24,
+            "gender": "",  # 빈 문자열 → 생략
+            "region": "서울 관악구",
+            "job": None,  # None → 생략
+            "bio": "다자녀 가정, 국가장학금 5구간",
+        }
+        formatted = _format_profile(profile)
+
+        # 채워진 고정 필드는 라벨과 값이 모두 포함된다.
+        self.assertIn("나이", formatted)
+        self.assertIn("24", formatted)
+        self.assertIn("지역", formatted)
+        self.assertIn("서울 관악구", formatted)
+        # bio 는 '기타(자유 서술)' 블록으로 렌더된다.
+        self.assertIn("기타(자유 서술)", formatted)
+        self.assertIn("다자녀 가정, 국가장학금 5구간", formatted)
+        # 비어 있는 고정 필드의 라벨은 등장하지 않는다.
+        self.assertNotIn("성별", formatted)
+        self.assertNotIn("직업", formatted)
+
+    def test_renders_custom_attributes_section(self) -> None:
+        # 사용자 지정 커스텀 필드(label/value)는 '추가 정보(사용자 지정)' 섹션에 나열된다.
+        profile = {
+            "age": 30,
+            "attributes": [
+                {"label": "가입 팬클럽", "value": "OO 팬클럽"},
+                {"label": "직급", "value": "과장"},
+            ],
+        }
+        formatted = _format_profile(profile)
+
+        self.assertIn("추가 정보(사용자 지정)", formatted)
+        self.assertIn("가입 팬클럽", formatted)
+        self.assertIn("OO 팬클럽", formatted)
+        self.assertIn("직급", formatted)
+        self.assertIn("과장", formatted)
+
+    def test_empty_attributes_are_omitted(self) -> None:
+        # 빈 리스트/빈 label·value 는 추가 정보 섹션 자체를 만들지 않는다.
+        profile_empty_list = {"age": 30, "attributes": []}
+        self.assertNotIn("추가 정보", _format_profile(profile_empty_list))
+
+        profile_blank_attr = {
+            "age": 30,
+            "attributes": [{"label": "", "value": ""}],
+        }
+        self.assertNotIn("추가 정보", _format_profile(profile_blank_attr))
+
+    def test_age_zero_is_omitted(self) -> None:
+        # age=0 은 실질적으로 '없음' → 나이 줄을 만들지 않는다(다른 필드는 정상 렌더).
+        formatted = _format_profile({"age": 0, "region": "부산"})
+        self.assertNotIn("나이", formatted)
+        self.assertIn("부산", formatted)
+
+    def test_empty_profile_returns_placeholder(self) -> None:
+        self.assertEqual(_format_profile({}), "(프로필 정보 없음)")
 
 
 @override_settings(LLM_RELEVANCE_THRESHOLD=0.5)

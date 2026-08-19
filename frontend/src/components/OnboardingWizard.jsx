@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Sparkles,
   Plus,
@@ -11,11 +11,13 @@ import {
   AlertTriangle,
   BellRing,
   Globe,
+  UserRound,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import { GmailLogo, SlackLogo } from "./BrandLogos.jsx";
 import SlackWebhookHelp from "./SlackWebhookHelp.jsx";
 import SiteCatalog from "./SiteCatalog.jsx";
+import ProfileAttributeEditor from "./ProfileAttributeEditor.jsx";
 import { useToast } from "../context/toast.js";
 import { createInterest, deleteInterest } from "../api/interestApi.js";
 import { createAlertChannel } from "../api/alertApi.js";
@@ -24,11 +26,14 @@ import {
   deleteSourceSubscription,
 } from "../api/sourceApi.js";
 import { completeOnboarding } from "../api/authApi.js";
+import { updateProfile } from "../api/profileApi.js";
+import { useProfileAttributes } from "../hooks/useProfileAttributes.js";
 
 const STEPS = [
-  { id: 1, label: "관심사", Icon: Sparkles },
-  { id: 2, label: "알림", Icon: BellRing },
-  { id: 3, label: "사이트", Icon: Globe },
+  { id: 1, label: "프로필", Icon: UserRound },
+  { id: 2, label: "관심사", Icon: Sparkles },
+  { id: 3, label: "알림", Icon: BellRing },
+  { id: 4, label: "사이트", Icon: Globe },
 ];
 
 const KEYWORD_SUGGESTIONS = [
@@ -50,18 +55,66 @@ function OnboardingWizard({ user, onComplete }) {
   const [step, setStep] = useState(1);
   const [finishing, setFinishing] = useState(false);
 
-  // Step 1 — interests (persisted as you go)
+  // Step 1 — profile (고정·보편 필드 + 자유서술 bio). Prefilled from user prop.
+  const [profile, setProfile] = useState({
+    age: user?.age != null ? String(user.age) : "",
+    gender: user?.gender || "",
+    region: user?.region || "",
+    job: user?.job || "",
+    bio: user?.bio || "",
+  });
+  const profileSaved = useRef(false);
+
+  const setProfileField = (key) => (event) =>
+    setProfile((prev) => ({ ...prev, [key]: event.target.value }));
+
+  // Step 1 — 사용자 지정 커스텀 필드(ProfileAttribute). interests 처럼 즉시 저장한다.
+  // 로딩·CRUD·에러 처리는 '내 정보 설정' 모달과 공유하는 훅에 위임한다.
+  const {
+    attributes,
+    create: handleAttributeCreate,
+    update: handleAttributeUpdate,
+    remove: handleAttributeDelete,
+  } = useProfileAttributes();
+
+  // Best-effort profile persistence. Never blocks progression (mirrors finish()).
+  const saveProfile = async () => {
+    if (profileSaved.current) return;
+    const payload = {};
+    Object.entries(profile).forEach(([key, raw]) => {
+      const value = typeof raw === "string" ? raw.trim() : raw;
+      if (value === "" || value == null) return;
+      if (key === "age") {
+        const num = Number(value);
+        if (Number.isFinite(num)) payload.age = num;
+        return;
+      }
+      payload[key] = value;
+    });
+    if (Object.keys(payload).length === 0) {
+      profileSaved.current = true;
+      return;
+    }
+    try {
+      await updateProfile(payload);
+      profileSaved.current = true;
+    } catch {
+      // 저장 실패해도 온보딩 진행을 막지 않는다.
+    }
+  };
+
+  // Step 2 — interests (persisted as you go)
   const [keywords, setKeywords] = useState([]); // { id, keyword }
   const [keywordInput, setKeywordInput] = useState("");
   const [addingKeyword, setAddingKeyword] = useState(false);
 
-  // Step 2 — channels
+  // Step 3 — channels
   const [email, setEmail] = useState(user?.email || "");
   const [emailStatus, setEmailStatus] = useState(null); // null | 'busy' | {ok,error}
   const [webhook, setWebhook] = useState("");
   const [slackStatus, setSlackStatus] = useState(null);
 
-  // Step 3 — sites (local subscribed map: url -> { subscriptionId, sourceId })
+  // Step 4 — sites (local subscribed map: url -> { subscriptionId, sourceId })
   const [subscribed, setSubscribed] = useState({});
 
   const existingKeywords = useMemo(
@@ -166,6 +219,8 @@ function OnboardingWizard({ user, onComplete }) {
 
   const finish = async () => {
     setFinishing(true);
+    // 프로필 스텝을 거치지 않고 "나중에 하기" 로 끝낼 수도 있으니 여기서도 저장 시도.
+    await saveProfile();
     try {
       const updated = await completeOnboarding();
       onComplete(updated);
@@ -176,7 +231,11 @@ function OnboardingWizard({ user, onComplete }) {
   };
 
   const goNext = () => {
-    if (step < 3) setStep(step + 1);
+    if (step === 1) {
+      // 프로필 스텝을 앞으로 넘어갈 때 best-effort 저장(진행은 막지 않음).
+      saveProfile();
+    }
+    if (step < 4) setStep(step + 1);
     else finish();
   };
   const goBack = () => setStep((prev) => Math.max(1, prev - 1));
@@ -213,7 +272,7 @@ function OnboardingWizard({ user, onComplete }) {
           </button>
         </div>
 
-        <div className="onbProgress" aria-label={`3단계 중 ${step}단계`}>
+        <div className="onbProgress" aria-label={`4단계 중 ${step}단계`}>
           {STEPS.map((s, index) => (
             <div
               key={s.id}
@@ -234,6 +293,89 @@ function OnboardingWizard({ user, onComplete }) {
 
         <div className="onbBody">
           {step === 1 && (
+            <div className="onbStepInner">
+              <h2 className="onbStepHeading">당신에 대해 알려주세요</h2>
+              <p className="onbStepSub">
+                나이·성별·지역·직업 같은 기본 배경과, 직접 추가하는 정보를 알수록
+                AI가 더 잘 맞는 공지를 골라줘요. 전부 선택이고, 나중에 언제든 바꿀 수
+                있어요.
+              </p>
+
+              <div className="onbProfileGrid">
+                <label className="onbField">
+                  <span className="onbFieldLabel">나이</span>
+                  <input
+                    className="onbInput"
+                    type="number"
+                    inputMode="numeric"
+                    value={profile.age}
+                    onChange={setProfileField("age")}
+                    placeholder="예: 24"
+                  />
+                </label>
+                <label className="onbField">
+                  <span className="onbFieldLabel">성별</span>
+                  <select
+                    className="onbInput"
+                    value={profile.gender}
+                    onChange={setProfileField("gender")}
+                  >
+                    <option value="">선택 안 함</option>
+                    <option value="남성">남성</option>
+                    <option value="여성">여성</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </label>
+                <label className="onbField">
+                  <span className="onbFieldLabel">거주·활동 지역</span>
+                  <input
+                    className="onbInput"
+                    value={profile.region}
+                    onChange={setProfileField("region")}
+                    placeholder="예: 서울 관악구"
+                  />
+                </label>
+                <label className="onbField">
+                  <span className="onbFieldLabel">직업</span>
+                  <input
+                    className="onbInput"
+                    value={profile.job}
+                    onChange={setProfileField("job")}
+                    placeholder="예: 대학생, 직장인"
+                  />
+                </label>
+              </div>
+
+              <label className="onbField onbFieldFull">
+                <span className="onbFieldLabel">
+                  기타 · 당신에 대해 자유롭게 알려주세요
+                </span>
+                <textarea
+                  className="onbInput onbTextarea"
+                  value={profile.bio}
+                  onChange={setProfileField("bio")}
+                  rows={4}
+                  placeholder="정형 항목에 없는 건 뭐든 적어주세요 — 가족관계, 라이프스타일, 자격·혜택 조건, 취향 등 자유롭게."
+                />
+              </label>
+
+              <div className="onbCustomFields">
+                <span className="onbFieldLabel">추가 정보 (내가 만든 필드)</span>
+                <p className="onbStepSub">
+                  나에게 맞는 배경·자격을 직접 추가하세요. 예: 거주 형태, 자녀 유무,
+                  반려동물, 사용 통신사, 관심 취미 등. 추가하면 바로 저장돼요.
+                </p>
+                <ProfileAttributeEditor
+                  attributes={attributes}
+                  onCreate={handleAttributeCreate}
+                  onUpdate={handleAttributeUpdate}
+                  onDelete={handleAttributeDelete}
+                />
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어떤 공지를 받고 싶으세요?</h2>
               <p className="onbStepSub">
@@ -306,7 +448,7 @@ function OnboardingWizard({ user, onComplete }) {
             </div>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어디로 알림을 보낼까요?</h2>
               <p className="onbStepSub">
@@ -400,7 +542,7 @@ function OnboardingWizard({ user, onComplete }) {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어떤 사이트를 모아볼까요?</h2>
               <p className="onbStepSub">
@@ -430,7 +572,7 @@ function OnboardingWizard({ user, onComplete }) {
               <>
                 <Loader2 size={17} className="spin" /> 마무리 중...
               </>
-            ) : step < 3 ? (
+            ) : step < 4 ? (
               <>
                 다음 <ArrowRight size={17} />
               </>

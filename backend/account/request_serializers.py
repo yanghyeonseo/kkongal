@@ -11,9 +11,11 @@ class SignUpRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     username = serializers.CharField()
+    # 고정·보편 프로필 필드(모두 optional). validated_data 로 흘러 create() 의 User(**...) 에 반영된다.
     age = serializers.IntegerField(required=False, allow_null=True)
     job = serializers.CharField(required=False, allow_blank=True)
     gender = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(required=False, allow_blank=True)
 
     def validate_email(self, value):
         value = value.strip()
