@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
@@ -10,12 +11,19 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from account.request_serializers import (
+    EmailVerifyRequestSerializer,
     SignInRequestSerializer,
     SignUpRequestSerializer,
     TokenRefreshRequestSerializer,
     LogoutRequestSerializer,
 )
-from .models import Interest, ProfileAttribute
+from .emails import issue_and_send_verification
+from .models import (
+    EmailVerification,
+    Interest,
+    ProfileAttribute,
+    hash_verification_token,
+)
 from .serializers import (
     InterestSerializer,
     ProfileAttributeSerializer,
@@ -86,6 +94,9 @@ class SignUpView(APIView):
         serializer = SignUpRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # 인증 메일은 백그라운드로 보낸다. SMTP 가 느리거나 죽어 있어도 가입 응답이
+        # 막히면 안 되고, 실패해도 사용자는 "다시 보내기"로 재시도할 수 있다.
+        issue_and_send_verification(user)
         return set_token_on_response_cookie(user, status_code=status.HTTP_201_CREATED)
 
 
@@ -100,16 +111,21 @@ class SignInView(APIView):
         responses={200: UserSerializer, 400: "Bad Request", 401: "Unauthorized"},
     )
     def post(self, request):
-        username = request.data.get("username")
+        email = request.data.get("email")
         password = request.data.get("password")
-        if not username or not password:
+        if not email or not password:
             return Response(
-                {"message": "missing fields ['username', 'password'] in body"},
+                {"message": "missing fields ['email', 'password'] in body"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # 가입 시 이메일을 소문자로 저장하지만, 과거 데이터나 대문자 입력도 받아주기
+        # 위해 조회는 iexact 로 한다(유니크 검사와 같은 기준이라 어긋나지 않는다).
+        #
         # 사용자 존재 여부를 노출하지 않도록: 사용자가 없으면 더미 해시로 check_password 를
         # 수행해 타이밍 차이를 없애고, 실패 사유를 구분하지 않는 단일 메시지를 돌려준다.
-        user = User.objects.filter(username=username).first()
+        # 로그인 ID 가 이메일이 되면서 "이 주소가 가입돼 있는가"가 더 민감해졌으므로
+        # 이 방어는 반드시 유지한다.
+        user = User.objects.filter(email__iexact=email.strip()).first()
         if user is None:
             User().set_password(password)  # 타이밍 공격 완화용 더미 해시
             password_ok = False
@@ -118,7 +134,7 @@ class SignInView(APIView):
 
         if not password_ok:
             return Response(
-                {"message": "아이디 또는 비밀번호가 올바르지 않습니다."},
+                {"message": "이메일 또는 비밀번호가 올바르지 않습니다."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         return set_token_on_response_cookie(user, status_code=status.HTTP_200_OK)
@@ -225,6 +241,104 @@ class MeView(APIView):
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
 
+class EmailVerifyView(APIView):
+    """메일 링크의 토큰으로 이메일 소유를 확인한다.
+
+    로그인 없이도 호출할 수 있어야 한다 — 사용자가 메일을 다른 브라우저나 폰에서
+    열 수 있기 때문이다. 토큰 자체가 인증 수단이므로 AllowAny 로 두고, 대신
+    'auth' scope 로 빈도를 제한해 토큰 무차별 대입을 막는다.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        summary="이메일 인증",
+        description="가입 시 발송된 메일의 토큰으로 이메일 인증을 완료합니다.",
+        request=EmailVerifyRequestSerializer,
+        responses={200: "인증 완료", 400: "토큰이 유효하지 않거나 만료됨"},
+    )
+    def post(self, request):
+        serializer = EmailVerifyRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        token_hash = hash_verification_token(serializer.validated_data["token"])
+        record = (
+            EmailVerification.objects.select_related("user")
+            .filter(token_hash=token_hash)
+            .first()
+        )
+
+        if record is None:
+            return Response(
+                {"detail": "인증 링크가 올바르지 않아요. 메일을 다시 요청해주세요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 이미 인증을 마친 계정이 같은 링크를 다시 열었을 때는 성공으로 응답한다.
+        # (메일 클라이언트의 링크 프리페치나 사용자의 새로고침으로 흔히 일어난다.)
+        if record.used_at is not None and record.user.email_verified:
+            return Response(
+                {"detail": "이미 인증이 완료된 계정이에요.", "email_verified": True},
+                status=status.HTTP_200_OK,
+            )
+
+        if not record.is_usable:
+            return Response(
+                {"detail": "인증 링크가 만료됐어요. 인증 메일을 다시 보내주세요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 토큰 발급 후 사용자가 이메일을 바꿨다면 이 토큰은 더 이상 그 주소를
+        # 증명하지 못한다. 발급 시점 주소와 현재 주소가 같을 때만 인증 처리한다.
+        user = record.user
+        if record.email.lower() != (user.email or "").lower():
+            return Response(
+                {"detail": "이메일이 변경되어 이 링크는 더 이상 유효하지 않아요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        record.used_at = timezone.now()
+        record.save(update_fields=["used_at"])
+        user.email_verified = True
+        user.save(update_fields=["email_verified"])
+
+        return Response(
+            {"detail": "이메일 인증이 완료됐어요.", "email_verified": True},
+            status=status.HTTP_200_OK,
+        )
+
+
+class EmailVerifyResendView(APIView):
+    """인증 메일 재발송. 로그인한 사용자 본인에게만 보낸다."""
+
+    throttle_scope = "auth"
+
+    @extend_schema(
+        summary="인증 메일 재발송",
+        description="현재 로그인한 사용자의 이메일로 인증 메일을 다시 보냅니다.",
+        request=None,
+        responses={200: "발송 요청됨", 400: "이미 인증됨", 401: "Unauthorized"},
+    )
+    def post(self, request):
+        error = login_required_response(request)
+        if error:
+            return error
+
+        user = request.user
+        if user.email_verified:
+            return Response(
+                {"detail": "이미 인증이 완료된 계정이에요."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        issue_and_send_verification(user)
+        return Response(
+            {"detail": "인증 메일을 다시 보냈어요. 메일함을 확인해주세요."},
+            status=status.HTTP_200_OK,
+        )
+
+
 class OnboardingCompleteView(APIView):
     @extend_schema(
         summary="온보딩 완료",
@@ -244,13 +358,19 @@ class OnboardingCompleteView(APIView):
 
 
 class ProfileView(APIView):
-    # 프로필 부분 수정. 화이트리스트 필드만 갱신하며 username/password/email/onboarded 는 못 바꾼다.
+    # 프로필 부분 수정. 화이트리스트 필드만 갱신하며 username/password/email/
+    # onboarded/email_verified 는 못 바꾼다(이메일은 로그인 ID 이자 인증 대상이라
+    # 여기서 바꾸면 인증 상태와 어긋난다).
     _EDITABLE_STR_FIELDS = (
+        "nickname",
         "gender",
         "job",
         "region",
         "bio",
     )
+
+    # 길이 제한이 있는 필드는 모델 제약을 넘기 전에 잘라낸다(DB 에러 대신 조용한 절삭).
+    _MAX_LENGTHS = {"nickname": 32, "gender": 32, "job": 128, "region": 128}
 
     @extend_schema(
         summary="프로필 수정",
@@ -270,7 +390,11 @@ class ProfileView(APIView):
         for field in self._EDITABLE_STR_FIELDS:
             if field in request.data:
                 value = request.data.get(field)
-                setattr(user, field, "" if value is None else str(value))
+                text = "" if value is None else str(value).strip()
+                limit = self._MAX_LENGTHS.get(field)
+                if limit is not None:
+                    text = text[:limit]
+                setattr(user, field, text)
                 updated_fields.append(field)
 
         # age 는 빈 값이면 None, 아니면 int 로 강제 변환한다(변환 실패 시 무시).

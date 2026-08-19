@@ -20,5 +20,5 @@ class NoticeSourceAdmin(admin.ModelAdmin):
 @admin.register(SourceSubscription)
 class SourceSubscriptionAdmin(admin.ModelAdmin):
     list_display = ("id", "user_id", "source_id")
-    search_fields = ("user_id__username", "source_id__name", "source_id__url")
+    search_fields = ("user_id__email", "source_id__name", "source_id__url")
     ordering = ("id",)

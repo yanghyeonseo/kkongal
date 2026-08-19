@@ -301,6 +301,10 @@ if EMAIL_USE_SSL:  # TLS/SSL 동시 사용 불가
 EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=20)
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+# filebased.EmailBackend 용 출력 디렉터리. SMTP 없이 실제 메일 내용(인증 링크 등)을
+# 확인해야 할 때 EMAIL_BACKEND 를 filebased 로 바꾸고 이 경로를 지정한다.
+# Django 기본값이 None 이라 지정하지 않고 filebased 를 쓰면 발송이 실패한다.
+EMAIL_FILE_PATH = env('EMAIL_FILE_PATH', default=str(BASE_DIR / 'sent_emails'))
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='꽁알꽁알 <no-reply@kkongal.cloud>')
 
 # ── 슬랙 알림 ────────────────────────────────────────────────────────────────
@@ -310,6 +314,12 @@ SLACK_TIMEOUT_SECONDS = env.float('SLACK_TIMEOUT_SECONDS', default=10.0)
 
 # 알림 메일/슬랙 메시지의 "대시보드에서 보기" 링크 등에 사용
 FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
+
+# ── 이메일 인증 ──────────────────────────────────────────────────────────────
+# 가입 시 발송하는 인증 링크의 유효 시간. 로그인 ID 가 이메일이라 오타가 나면 계정을
+# 잃으므로 소유 확인을 받되, 인증 전에도 로그인은 막지 않는다(SMTP 장애가 곧 서비스
+# 중단이 되지 않도록). 대신 미인증 계정에는 알림 메일을 보내지 않는다(alert/service.py).
+EMAIL_VERIFICATION_TTL_HOURS = env.int('EMAIL_VERIFICATION_TTL_HOURS', default=48)
 
 # ── 크롤러 ───────────────────────────────────────────────────────────────────
 # 외부 사이트 스크래핑 시 TLS 인증서 검증 여부(기본 True). 특정 사이트의 체인 문제로만

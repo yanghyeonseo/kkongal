@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import Interest, User
+from .models import EmailVerification, Interest, User
 
 
 @admin.register(User)
@@ -9,8 +9,9 @@ class CustomUserAdmin(UserAdmin):
 
     list_display = (
         "id",
-        "username",
         "email",
+        "nickname",
+        "email_verified",
         "age",
         "job",
         "gender",
@@ -20,11 +21,14 @@ class CustomUserAdmin(UserAdmin):
     )
 
     search_fields = (
-        "username",
         "email",
+        "nickname",
+        "username",
         "job",
         "gender",
     )
+
+    list_filter = UserAdmin.list_filter + ("email_verified",)
 
     ordering = ("id",)
 
@@ -33,6 +37,8 @@ class CustomUserAdmin(UserAdmin):
             "Additional Info",
             {
                 "fields": (
+                    "nickname",
+                    "email_verified",
                     "age",
                     "job",
                     "gender",
@@ -48,6 +54,7 @@ class CustomUserAdmin(UserAdmin):
             {
                 "fields": (
                     "email",
+                    "nickname",
                     "age",
                     "job",
                     "gender",
@@ -62,5 +69,16 @@ class CustomUserAdmin(UserAdmin):
 class InterestAdmin(admin.ModelAdmin):
     list_display = ("id", "user_id", "keyword", "priority", "created_at")
     list_filter = ("priority", "created_at")
-    search_fields = ("keyword", "description", "user_id__username")
+    search_fields = ("keyword", "description", "user_id__email")
     ordering = ("-created_at",)
+
+
+@admin.register(EmailVerification)
+class EmailVerificationAdmin(admin.ModelAdmin):
+    """이메일 인증 토큰. 원문 토큰은 저장하지 않으므로 여기서도 볼 수 없다(해시만)."""
+
+    list_display = ("id", "user", "email", "created_at", "expires_at", "used_at")
+    list_filter = ("created_at", "expires_at")
+    search_fields = ("email", "user__email")
+    ordering = ("-created_at",)
+    readonly_fields = ("token_hash",)

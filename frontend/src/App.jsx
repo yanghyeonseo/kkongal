@@ -14,6 +14,8 @@ import AlertSettingsModal from "./components/AlertSettingsModal.jsx";
 import AuthModal from "./components/AuthModal.jsx";
 import Landing from "./components/Landing.jsx";
 import OnboardingWizard from "./components/OnboardingWizard.jsx";
+import EmailVerifyBanner from "./components/EmailVerifyBanner.jsx";
+import EmailVerifyPage from "./components/EmailVerifyPage.jsx";
 
 import {
   getMyInboxNotices,
@@ -43,6 +45,9 @@ import { useToast } from "./context/toast.js";
 // SYNC_MAX_MS: 상태와 무관하게 이 시간이 지나면 개별 사이트를 종료로 간주(절대 타임아웃).
 // SYNC_MAX_ERRORS: getSyncStatus 가 이 횟수만큼 연속 실패하면 배치 전체를 포기한다.
 const SYNC_MAX_MS = 90_000;
+
+// 인증 메일 링크가 도착하는 경로(백엔드 account/emails.py 의 build_verification_url 과 일치).
+const VERIFY_PATH = "/verify-email";
 const SYNC_MAX_ERRORS = 5;
 
 function App() {
@@ -50,6 +55,14 @@ function App() {
 
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // 메일의 인증 링크(/verify-email?token=...)로 들어온 경우. SPA 라우터가 없으므로
+  // 최초 렌더에서 한 번만 URL 을 읽어 두고, 인증 화면을 닫을 때 주소를 정리한다.
+  const [verifyToken, setVerifyToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    if (window.location.pathname !== VERIFY_PATH) return null;
+    return new URLSearchParams(window.location.search).get("token") ?? "";
+  });
 
   const [notices, setNotices] = useState([]);
   const [sources, setSources] = useState([]);
@@ -414,6 +427,30 @@ function App() {
     ensurePolling();
   }, [sources, toast, ensurePolling]);
 
+  // 온보딩 1단계에서 닉네임을 저장하면 헤더 표시 이름이 바로 바뀌도록 반영한다.
+  const handleNicknameSaved = useCallback((user) => {
+    setCurrentUser((prev) => {
+      const next = { ...prev, ...user };
+      saveStoredUser(next);
+      return next;
+    });
+  }, []);
+
+  // 인증 화면을 닫을 때: 주소창의 토큰을 지우고(공유/새로고침 시 재사용 방지),
+  // 로그인 상태라면 email_verified 를 다시 읽어 배너가 사라지게 한다.
+  const handleVerifyDone = useCallback(() => {
+    window.history.replaceState({}, "", "/");
+    setVerifyToken(null);
+    getCurrentUser()
+      .then((user) => {
+        setCurrentUser(user);
+        saveStoredUser(user);
+      })
+      .catch(() => {
+        // 미로그인 상태로 링크를 연 경우. 랜딩으로 두면 된다.
+      });
+  }, []);
+
   const handleOnboardingComplete = useCallback(
     (user) => {
       const nextUser = { ...user, onboarded: true };
@@ -523,7 +560,10 @@ function App() {
     aiStatus.degraded && aiBannerDismissedReason !== aiStatus.reason;
 
   let content;
-  if (authLoading) {
+  if (verifyToken !== null) {
+    // 인증 링크로 들어온 경우: 로그인 여부와 무관하게 먼저 처리한다.
+    content = <EmailVerifyPage token={verifyToken} onDone={handleVerifyDone} />;
+  } else if (authLoading) {
     content = (
       <div className="bootLoader">
         <span className="bigSpinner" aria-hidden="true" />
@@ -534,7 +574,11 @@ function App() {
     content = <Landing onOpenAuth={handleOpenAuth} />;
   } else if (currentUser.onboarded === false) {
     content = (
-      <OnboardingWizard user={currentUser} onComplete={handleOnboardingComplete} />
+      <OnboardingWizard
+        user={currentUser}
+        onComplete={handleOnboardingComplete}
+        onNicknameSaved={handleNicknameSaved}
+      />
     );
   } else {
     content = (
@@ -568,6 +612,10 @@ function App() {
           />
 
           <main className="main">
+            {currentUser.emailVerified === false && (
+              <EmailVerifyBanner email={currentUser.email} />
+            )}
+
             {showAiBanner && (
               <AiStatusBanner
                 reason={aiStatus.reason}

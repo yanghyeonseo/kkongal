@@ -12,6 +12,7 @@ import {
   BellRing,
   Globe,
   UserRound,
+  Smile,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import { GmailLogo, SlackLogo } from "./BrandLogos.jsx";
@@ -30,11 +31,17 @@ import { updateProfile } from "../api/profileApi.js";
 import { useProfileAttributes } from "../hooks/useProfileAttributes.js";
 
 const STEPS = [
-  { id: 1, label: "프로필", Icon: UserRound },
+  // 호칭을 맨 앞에 둔다 — 첫 질문이 가벼울수록 이탈이 적고, 이후 단계에서
+  // "OO님" 으로 부를 수 있다. 상세 프로필은 그다음이다.
+  { id: 1, label: "호칭", Icon: Smile },
+  { id: 2, label: "프로필", Icon: UserRound },
   { id: 2, label: "관심사", Icon: Sparkles },
   { id: 3, label: "알림", Icon: BellRing },
   { id: 4, label: "사이트", Icon: Globe },
 ];
+
+const LAST_STEP = STEPS.length;
+const NICKNAME_MAX = 32;
 
 const KEYWORD_SUGGESTIONS = [
   "인턴",
@@ -49,13 +56,17 @@ const KEYWORD_SUGGESTIONS = [
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function OnboardingWizard({ user, onComplete }) {
+function OnboardingWizard({ user, onComplete, onNicknameSaved }) {
   const toast = useToast();
 
   const [step, setStep] = useState(1);
   const [finishing, setFinishing] = useState(false);
 
-  // Step 1 — profile (고정·보편 필드 + 자유서술 bio). Prefilled from user prop.
+  // Step 1 — 표시 이름. 비워두면 이메일 로컬파트로 폴백하므로 건너뛸 수 있다.
+  const [nickname, setNickname] = useState(user?.nickname || "");
+  const [savingNickname, setSavingNickname] = useState(false);
+
+  // Step 2 — profile (고정·보편 필드 + 자유서술 bio). Prefilled from user prop.
   const [profile, setProfile] = useState({
     age: user?.age != null ? String(user.age) : "",
     gender: user?.gender || "",
@@ -230,12 +241,30 @@ function OnboardingWizard({ user, onComplete }) {
     }
   };
 
-  const goNext = () => {
-    if (step === 1) {
+  // 닉네임은 "다음"을 누를 때 저장한다. 프로필 부분수정 엔드포인트를 그대로 쓴다
+  // (PATCH /api/account/profile/ 화이트리스트에 nickname 포함). 실패해도 온보딩을
+  // 막지 않는다 — 표시 이름은 없으면 이메일 로컬파트로 폴백되므로 치명적이지 않다.
+  const saveNickname = async () => {
+    const trimmed = nickname.trim();
+    if (trimmed === (user?.nickname || "")) return;
+    setSavingNickname(true);
+    try {
+      const updated = await updateProfile({ nickname: trimmed });
+      onNicknameSaved?.(updated);
+    } catch (error) {
+      toast.error(error.message || "이름 저장에 실패했어요. 나중에 바꿀 수 있어요.");
+    } finally {
+      setSavingNickname(false);
+    }
+  };
+
+  const goNext = async () => {
+    if (step === 1) await saveNickname();
+    if (step === 2) {
       // 프로필 스텝을 앞으로 넘어갈 때 best-effort 저장(진행은 막지 않음).
       saveProfile();
     }
-    if (step < 4) setStep(step + 1);
+    if (step < LAST_STEP) setStep(step + 1);
     else finish();
   };
   const goBack = () => setStep((prev) => Math.max(1, prev - 1));
@@ -272,7 +301,7 @@ function OnboardingWizard({ user, onComplete }) {
           </button>
         </div>
 
-        <div className="onbProgress" aria-label={`4단계 중 ${step}단계`}>
+        <div className="onbProgress" aria-label={`${LAST_STEP}단계 중 ${step}단계`}>
           {STEPS.map((s, index) => (
             <div
               key={s.id}
@@ -293,6 +322,38 @@ function OnboardingWizard({ user, onComplete }) {
 
         <div className="onbBody">
           {step === 1 && (
+            <div className="onbStepInner">
+              <h2 className="onbStepHeading">어떻게 불러드릴까요?</h2>
+              <p className="onbStepSub">
+                알림과 화면에서 이렇게 불러드릴게요. 나중에 언제든 바꿀 수 있어요.
+              </p>
+
+              <div className="onbChipRow">
+                <input
+                  value={nickname}
+                  onChange={(event) => setNickname(event.target.value.slice(0, NICKNAME_MAX))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      goNext();
+                    }
+                  }}
+                  placeholder="예: 현서"
+                  aria-label="표시할 이름"
+                  maxLength={NICKNAME_MAX}
+                  autoFocus
+                />
+              </div>
+
+              <p className="onbEmptyHint">
+                {nickname.trim()
+                  ? `반가워요, ${nickname.trim()}님!`
+                  : "비워두면 이메일 앞부분으로 불러드릴게요."}
+              </p>
+            </div>
+          )}
+
+          {step === 2 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">당신에 대해 알려주세요</h2>
               <p className="onbStepSub">
@@ -375,7 +436,7 @@ function OnboardingWizard({ user, onComplete }) {
             </div>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어떤 공지를 받고 싶으세요?</h2>
               <p className="onbStepSub">
@@ -448,7 +509,7 @@ function OnboardingWizard({ user, onComplete }) {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어디로 알림을 보낼까요?</h2>
               <p className="onbStepSub">
@@ -542,7 +603,7 @@ function OnboardingWizard({ user, onComplete }) {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="onbStepInner">
               <h2 className="onbStepHeading">어떤 사이트를 모아볼까요?</h2>
               <p className="onbStepSub">
@@ -566,13 +627,13 @@ function OnboardingWizard({ user, onComplete }) {
             type="button"
             className="onbNavBtn primary"
             onClick={goNext}
-            disabled={finishing}
+            disabled={finishing || savingNickname}
           >
-            {finishing ? (
+            {finishing || savingNickname ? (
               <>
                 <Loader2 size={17} className="spin" /> 마무리 중...
               </>
-            ) : step < 4 ? (
+            ) : step < LAST_STEP ? (
               <>
                 다음 <ArrowRight size={17} />
               </>
