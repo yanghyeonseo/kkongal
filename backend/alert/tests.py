@@ -89,6 +89,9 @@ class AlertTestBase(TestCase):
 
 
 class EmailDispatchTests(AlertTestBase):
+    # 대시보드 링크는 settings.FRONTEND_URL 을 그대로 쓴다. 배포 서버의 .env 가
+    # 실제 도메인을 넣어두면 기본값을 가정한 단언이 깨지므로 여기서 고정한다.
+    @override_settings(FRONTEND_URL="http://localhost:3000")
     def test_email_dispatch_success(self):
         notice = self.make_notice("https://snu.example.com/n/1")
         inbox = self.make_inbox(notice)

@@ -1,5 +1,5 @@
-// 같은 오리진(Vite dev 프록시)으로 요청하므로 base URL 은 비워둔다. → `/api/...`
-const API_BASE_URL = "https://api.kkongal.hs-yang.com";
+// 같은 오리진(dev 는 Vite 프록시, 배포는 nginx)으로 요청하므로 base URL 은 비워둔다. → `/api/...`
+const API_BASE_URL = "";
 
 // 인증 자체를 수행하는 공개 엔드포인트. 이 경로들은 401 이어도 refresh 재시도를 하지 않는다
 // (그래야 로그인/회원가입/재발급 실패가 무의미한 refresh 루프로 번지지 않는다). 쿠키는
