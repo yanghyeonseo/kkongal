@@ -116,9 +116,9 @@ npm run dev                          # http://localhost:3000 (→ /api 는 백�
 
 사용자는 웹 UI 의 사이트별 **동기화** 버튼으로도 즉시 크롤·선별을 돌릴 수 있다(`POST /api/sources/<id>/sync/`).
 
-### 4) 배포 (AWS)
+### 4) 배포 (가비아 서버)
 
-Docker 없이 **EC2 + systemd + nginx + RDS PostgreSQL** 로 배포한다. nginx 가 빌드된 SPA 를 서빙하고 `/api` 를 gunicorn 으로 프록시하며(동일 오리진 → JWT 쿠키 first-party), 파이프라인은 systemd 타이머가 `run_pipeline` 을 주기 실행한다. 단계별 절차·설정 파일은 [docs/DEPLOY.md](docs/DEPLOY.md) 와 `deploy/` 를 참고한다.
+Docker 없이 **가비아 서버 + systemd + nginx + PostgreSQL** 로 배포한다. nginx 가 빌드된 SPA 를 서빙하고 `/api` 를 gunicorn 으로 프록시하며(동일 오리진 → JWT 쿠키 first-party), 파이프라인은 systemd 타이머가 `run_pipeline` 을 주기 실행한다. 단계별 절차·설정 파일은 [docs/DEPLOY.md](docs/DEPLOY.md) 와 `deploy/` 를 참고한다.
 
 ### 환경 변수
 
