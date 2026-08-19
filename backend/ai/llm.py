@@ -293,11 +293,19 @@ class LLMClient:
         payload = {
             "model": model,
             "messages": messages,
-            "temperature": 0,
             # 대부분의 OpenAI 호환 제공자(OpenAI/Gemini/DeepSeek/Groq)가 지원.
             # 미지원 제공자여도 방어적 파서가 백업 역할을 한다.
             "response_format": {"type": "json_object"},
         }
+        # temperature / reasoning_effort 는 제공자·모델마다 지원 여부가 갈린다.
+        # (예: OpenAI 추론 계열은 temperature 를 거부하고, GPT-4 계열은
+        # reasoning_effort 를 모른다.) 설정이 비어 있으면 아예 보내지 않는다 —
+        # 지원하지 않는 파라미터를 보내면 400 이고, 이 클라이언트는 그 실패를
+        # 삼키고 키워드 폴백으로 내려가 원인이 잘 안 보인다.
+        if settings.LLM_TEMPERATURE is not None:
+            payload["temperature"] = settings.LLM_TEMPERATURE
+        if settings.LLM_REASONING_EFFORT:
+            payload["reasoning_effort"] = settings.LLM_REASONING_EFFORT
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",

@@ -1070,3 +1070,59 @@ class ThrottleTests(TestCase):
         # 2번째: now=1000, last=1000 → wait=3.0 → sleep(3.0) 정확히 한 번.
         self.assertEqual(len(sleeps), 1)
         self.assertAlmostEqual(sleeps[0], 3.0, places=6)
+
+
+class PayloadParameterCompatTests(TestCase):
+    """제공자별로 지원 여부가 갈리는 파라미터는 설정이 비면 보내지 않는다.
+
+    OpenAI 추론 계열(gpt-5/5.6, o-시리즈)은 temperature 를 거부하고, GPT-4 계열은
+    reasoning_effort 를 모른다. 지원하지 않는 값을 보내면 400 인데 이 클라이언트는
+    실패를 삼키고 키워드 폴백으로 내려가므로, '동작은 하는데 품질이 이상한' 상태가
+    된다. 그래서 payload 구성이 설정을 정확히 따르는지 못 박아 둔다.
+    """
+
+    def _capture_payload(self):
+        """chat/completions 로 실제 전송된 JSON payload 를 잡아낸다."""
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"content": '{"summary": "a. b. c.", '
+                                                '"content_markdown": "x", '
+                                                '"deadline_at": null}'}}
+                    ]
+                },
+            )
+
+        return captured, httpx.MockTransport(handler)
+
+    @override_settings(
+        LLM_API_KEY="test-key", LLM_TEMPERATURE=0.0, LLM_REASONING_EFFORT=""
+    )
+    def test_temperature_sent_when_configured(self):
+        captured, transport = self._capture_payload()
+        LLMClient(transport=transport).enrich(title="제목", content="본문")
+        self.assertEqual(captured["temperature"], 0.0)
+        self.assertNotIn("reasoning_effort", captured)
+
+    @override_settings(
+        LLM_API_KEY="test-key", LLM_TEMPERATURE=None, LLM_REASONING_EFFORT=""
+    )
+    def test_temperature_omitted_when_unset(self):
+        """OpenAI 추론 계열용. 보내면 400 이므로 키가 아예 없어야 한다."""
+        captured, transport = self._capture_payload()
+        LLMClient(transport=transport).enrich(title="제목", content="본문")
+        self.assertNotIn("temperature", captured)
+
+    @override_settings(
+        LLM_API_KEY="test-key", LLM_TEMPERATURE=None, LLM_REASONING_EFFORT="none"
+    )
+    def test_reasoning_effort_sent_when_configured(self):
+        captured, transport = self._capture_payload()
+        LLMClient(transport=transport).enrich(title="제목", content="본문")
+        self.assertEqual(captured["reasoning_effort"], "none")
+        self.assertNotIn("temperature", captured)

@@ -288,6 +288,18 @@ LLM_MAX_CONTENT_CHARS = env.int('LLM_MAX_CONTENT_CHARS', default=2000)
 LLM_RELEVANCE_THRESHOLD = env.float('LLM_RELEVANCE_THRESHOLD', default=0.5)  # inbox/알림 최소 관련도
 LLM_MIN_REQUEST_INTERVAL_SECONDS = env.float('LLM_MIN_REQUEST_INTERVAL_SECONDS', default=4.5)  # 요청 간 최소 간격(초, ~15 RPM)
 
+# ── 제공자별 파라미터 호환 ───────────────────────────────────────────────────
+# OpenAI 의 추론(reasoning) 계열 모델(gpt-5 / gpt-5.6 계열, o-시리즈)은 temperature 를
+# 아예 거부하거나 기본값 1 만 받는다. 반면 Gemini/DeepSeek 등은 temperature=0 으로
+# 결정성을 높이는 게 유리하다. 그래서 값을 비우면 파라미터 자체를 payload 에서 뺀다.
+_llm_temperature_raw = env('LLM_TEMPERATURE', default='0').strip()
+LLM_TEMPERATURE = float(_llm_temperature_raw) if _llm_temperature_raw else None
+
+# 추론 강도(chat/completions 의 reasoning_effort). 공지 요약·분류는 깊은 추론이 필요
+# 없어 'none'/'low' 로 낮추면 추론 토큰(=출력 과금)이 줄어 비용이 내려간다.
+# 비우면 파라미터를 생략한다 — 이 값을 모르는 제공자에게 보내면 400 이 날 수 있다.
+LLM_REASONING_EFFORT = env('LLM_REASONING_EFFORT', default='').strip()
+
 # ── 이메일 알림 (SMTP) ───────────────────────────────────────────────────────
 # 기본은 콘솔 백엔드(자격 증명 없이 동작). 587 STARTTLS 가 막히는 망에서는 .env 에서
 # EMAIL_PORT=465 · EMAIL_USE_SSL=True · EMAIL_USE_TLS=False 로 전환한다.
