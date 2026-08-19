@@ -39,7 +39,7 @@ DEBUG = env('DEBUG')
 
 # 프로덕션에서는 ALLOWED_HOSTS 에 실제 도메인을 콤마로 나열한다(예: "kkongal.cloud").
 # DEBUG=False + 빈 목록이면 Django 가 모든 요청을 400 으로 막으므로 기본은 로컬 호스트.
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1', '15.164.24.120', 'kkongal.hs-yang.com', 'api.kkongal.hs-yang.com'])
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 
 
 # Application definition
