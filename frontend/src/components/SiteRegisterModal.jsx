@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Plus, Loader2, Pencil, Trash2, Check, X } from "lucide-react";
 import ModalShell from "./ModalShell.jsx";
 import SiteCatalog from "./SiteCatalog.jsx";
 import SourceFavicon from "./SourceFavicon.jsx";
@@ -9,6 +9,49 @@ import {
   deleteSourceSubscription,
   updateSourceName,
 } from "../api/sourceApi.js";
+
+// 등록 대상은 '공지가 목록으로 쌓이는 게시판' 페이지다. 사이트 메인이나 개별 공지글을
+// 넣으면 크롤러가 목록에서 새 글을 뽑아낼 수 없어 수집이 0건이 된다. 글로 설명하면
+// 잘 안 읽히므로 O/X 예시를 나란히 보여준다.
+const URL_EXAMPLES = {
+  good: [
+    { url: "example.com/notice", note: "공지 목록 페이지" },
+    { url: "example.com/board/list", note: "게시판 목록" },
+  ],
+  bad: [
+    { url: "example.com", note: "사이트 메인" },
+    { url: "example.com/notice/1234", note: "개별 공지글" },
+  ],
+};
+
+function UrlExampleGuide() {
+  return (
+    <div className="urlGuide">
+      <div className="urlGuideCol good">
+        <span className="urlGuideHead">
+          <Check size={14} aria-hidden="true" /> 이런 주소를 넣어주세요
+        </span>
+        {URL_EXAMPLES.good.map((item) => (
+          <div key={item.url} className="urlGuideItem">
+            <code>{item.url}</code>
+            <span>{item.note}</span>
+          </div>
+        ))}
+      </div>
+      <div className="urlGuideCol bad">
+        <span className="urlGuideHead">
+          <X size={14} aria-hidden="true" /> 이런 주소는 수집이 안 돼요
+        </span>
+        {URL_EXAMPLES.bad.map((item) => (
+          <div key={item.url} className="urlGuideItem">
+            <code>{item.url}</code>
+            <span>{item.note}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // 카탈로그 항목과 구독중 소스를 매칭(우선 sourceId, 없으면 url).
 function matchesCatalog(source, item) {
@@ -192,7 +235,7 @@ function SiteRegisterModal({
             className="urlRegisterInput"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="예: https://example.com/notice"
+            placeholder="예: https://example.com/notice (공지 목록 페이지)"
             aria-label="등록할 사이트 URL"
           />
           <button type="submit" className="primaryButton" disabled={adding}>
@@ -200,6 +243,13 @@ function SiteRegisterModal({
             등록
           </button>
         </div>
+        <p className="urlRegisterHint">
+          <strong>공지가 목록으로 쌓이는 게시판 주소</strong>를 넣어주세요. 사이트 메인이나
+          공지글 하나를 넣으면 새 글을 찾아낼 수 없어요.
+        </p>
+
+        <UrlExampleGuide />
+
         <p className="urlRegisterHint">
           지원 목록에 없는 사이트도 URL로 추가할 수 있어요. 첫 동기화 후 AI가 이름과
           카테고리를 자동으로 채우고, 다른 사용자도 검색해 구독할 수 있게 돼요.

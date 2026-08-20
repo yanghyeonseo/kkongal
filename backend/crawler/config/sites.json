@@ -46,15 +46,6 @@
       "render": "http"
     },
     {
-      "id": "naver_cafe_notice",
-      "name": "소마 네이버 카페 게시판",
-      "url": "https://cafe.naver.com/f-e/cafes/31723403/menus/2",
-      "scraper": "naver_cafe_notice",
-      "category": "community",
-      "enabled": true,
-      "render": "http"
-    },
-    {
       "id": "thedream_scholarships",
       "name": "더드림코리아 장학금",
       "url": "https://www.thedreamkorea.com/scholarships?tab=all",
