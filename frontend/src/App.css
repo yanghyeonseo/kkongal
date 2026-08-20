@@ -4391,6 +4391,70 @@ button:disabled {
   font-size: 12.5px;
   font-weight: 600;
 }
+.urlRegisterHint strong {
+  color: var(--c-text);
+  font-weight: 800;
+}
+
+/* O/X 예시 — '어떤 주소를 넣어야 하는지'를 글 대신 눈으로 보여준다.
+   좁은 화면에서는 두 칸이 위아래로 쌓인다. */
+.urlGuide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.urlGuideCol {
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+.urlGuideCol.good {
+  border-color: #cdead6;
+  background: #f4fbf6;
+}
+.urlGuideCol.bad {
+  border-color: #f3d5d5;
+  background: #fdf6f6;
+}
+.urlGuideHead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+.urlGuideCol.good .urlGuideHead {
+  color: #1c7c46;
+}
+.urlGuideCol.bad .urlGuideHead {
+  color: #b03b3b;
+}
+.urlGuideItem {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 3px 0;
+}
+.urlGuideItem code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text);
+  word-break: break-all;
+}
+.urlGuideCol.bad .urlGuideItem code {
+  color: #8a5b5b;
+  text-decoration: line-through;
+  text-decoration-color: #d99;
+}
+.urlGuideItem span {
+  color: var(--c-text-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
 
 /* ---- Notice detail modal ---- */
 .detailMetaBar {
