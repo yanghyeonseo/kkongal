@@ -1126,3 +1126,98 @@ class PayloadParameterCompatTests(TestCase):
         LLMClient(transport=transport).enrich(title="제목", content="본문")
         self.assertEqual(captured["reasoning_effort"], "none")
         self.assertNotIn("temperature", captured)
+
+
+class CircuitBreakerTests(TestCase):
+    """연속 실패가 쌓이면 남은 배치에서 LLM 호출을 멈춘다.
+
+    실제로 겪은 상황: OpenAI 일일 한도(RPD 50)가 소진된 채 공지 285건을 돌리면
+    건마다 1·2차 모델을 두드리고 매 호출 앞에 스로틀 대기(6.5초)가 붙어, 한 번
+    실행이 한 시간 넘게 잠만 잔다. 파이프라인은 매시간 도는 타이머라 실행이 겹친다.
+    """
+
+    def _failing_transport(self, counter):
+        def handler(request: httpx.Request) -> httpx.Response:
+            counter.append(1)
+            return httpx.Response(429, json={"error": {"message": "rate limit"}})
+
+        return httpx.MockTransport(handler)
+
+    @override_settings(
+        LLM_API_KEY="test-key",
+        LLM_CIRCUIT_BREAKER_FAILURES=3,
+        LLM_MIN_REQUEST_INTERVAL_SECONDS=0,
+        LLM_MODEL="m1",
+        LLM_FALLBACK_MODEL="m2",
+    )
+    def test_stops_calling_api_after_threshold(self):
+        calls = []
+        client = LLMClient(transport=self._failing_transport(calls))
+
+        for _ in range(10):
+            client.enrich(title="제목", content="본문")
+
+        # 임계값 3건까지만 실제 호출(건당 모델 2개) = 6회. 이후는 호출 없음.
+        self.assertEqual(len(calls), 6)
+        self.assertTrue(client._circuit_open)
+
+    @override_settings(
+        LLM_API_KEY="test-key",
+        LLM_CIRCUIT_BREAKER_FAILURES=3,
+        LLM_MIN_REQUEST_INTERVAL_SECONDS=0,
+        LLM_MODEL="m1",
+        LLM_FALLBACK_MODEL="m2",
+    )
+    def test_classify_also_short_circuits(self):
+        calls = []
+        client = LLMClient(transport=self._failing_transport(calls))
+
+        verdicts = [
+            client.classify(title="제목", content="본문", interests=[])
+            for _ in range(10)
+        ]
+
+        self.assertEqual(len(calls), 6)
+        # 차단 후에도 결과는 계속 나온다 — 결정론적 키워드 폴백으로.
+        self.assertTrue(all(v.provider == PROVIDER_FALLBACK for v in verdicts))
+
+    @override_settings(
+        LLM_API_KEY="test-key",
+        LLM_CIRCUIT_BREAKER_FAILURES=3,
+        LLM_MIN_REQUEST_INTERVAL_SECONDS=0,
+        LLM_MODEL="m1",
+        LLM_FALLBACK_MODEL="m2",
+    )
+    def test_success_resets_the_counter(self):
+        """간헐적 실패로는 회로가 열리면 안 된다(연속일 때만)."""
+        state = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            state["n"] += 1
+            # 실패 2회마다 한 번씩 성공시켜 연속 실패가 쌓이지 않게 한다.
+            if state["n"] % 3 == 0:
+                return httpx.Response(200, json={"choices": [{"message": {
+                    "content": '{"summary": "a. b. c.", "content_markdown": "x", '
+                               '"deadline_at": null}'}}]})
+            return httpx.Response(429, json={"error": {"message": "rate limit"}})
+
+        client = LLMClient(transport=httpx.MockTransport(handler))
+        for _ in range(10):
+            client.enrich(title="제목", content="본문")
+
+        self.assertFalse(client._circuit_open)
+
+    @override_settings(
+        LLM_API_KEY="test-key",
+        LLM_CIRCUIT_BREAKER_FAILURES=0,
+        LLM_MIN_REQUEST_INTERVAL_SECONDS=0,
+        LLM_MODEL="m1",
+        LLM_FALLBACK_MODEL="m2",
+    )
+    def test_disabled_when_threshold_is_zero(self):
+        calls = []
+        client = LLMClient(transport=self._failing_transport(calls))
+        for _ in range(4):
+            client.enrich(title="제목", content="본문")
+        self.assertEqual(len(calls), 8)  # 4건 × 모델 2개, 차단 없음
+        self.assertFalse(client._circuit_open)

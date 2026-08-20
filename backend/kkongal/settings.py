@@ -300,6 +300,13 @@ LLM_TEMPERATURE = float(_llm_temperature_raw) if _llm_temperature_raw else None
 # 비우면 파라미터를 생략한다 — 이 값을 모르는 제공자에게 보내면 400 이 날 수 있다.
 LLM_REASONING_EFFORT = env('LLM_REASONING_EFFORT', default='').strip()
 
+# 연속 실패가 이 횟수에 도달하면 남은 배치에서는 LLM 호출을 건너뛰고 결정론적 폴백만
+# 쓴다(회로 차단). rate limit 으로 한도가 소진되면 공지 수백 건마다 1·2차 모델을 계속
+# 두드리게 되는데, 요청 간 스로틀까지 붙어 한 번 실행이 몇십 분씩 잠만 자게 된다.
+# 파이프라인은 systemd 타이머로 매시간 도므로 그러면 실행이 서로 겹친다.
+# 0 이면 차단하지 않는다(항상 끝까지 시도).
+LLM_CIRCUIT_BREAKER_FAILURES = env.int('LLM_CIRCUIT_BREAKER_FAILURES', default=5)
+
 # ── 이메일 알림 (SMTP) ───────────────────────────────────────────────────────
 # 기본은 콘솔 백엔드(자격 증명 없이 동작). 587 STARTTLS 가 막히는 망에서는 .env 에서
 # EMAIL_PORT=465 · EMAIL_USE_SSL=True · EMAIL_USE_TLS=False 로 전환한다.

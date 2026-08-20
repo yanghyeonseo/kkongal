@@ -180,11 +180,35 @@ class LLMClient:
                 seen.add(name)
                 self.models.append(name)
         self._transport = transport
+        # 회로 차단기 상태. 클라이언트는 배치(enrich_notices/run_classification)당
+        # 하나씩 만들어 재사용하므로, 이 카운터의 수명이 곧 그 배치의 수명이다.
+        self._consecutive_failures = 0
+        self._circuit_open = False
 
     @property
     def enabled(self) -> bool:
         """API 키가 있으면 실제 LLM 호출, 없으면 폴백."""
         return bool(self.api_key)
+
+    @property
+    def _should_skip_llm(self) -> bool:
+        """차단기가 열렸으면 HTTP 호출도 스로틀 대기도 하지 않는다."""
+        return self._circuit_open
+
+    def _record_success(self) -> None:
+        self._consecutive_failures = 0
+
+    def _record_failure(self) -> None:
+        """모든 모델 계층이 실패한 1건을 기록하고, 임계값을 넘으면 회로를 연다."""
+        self._consecutive_failures += 1
+        threshold = settings.LLM_CIRCUIT_BREAKER_FAILURES
+        if threshold and not self._circuit_open and self._consecutive_failures >= threshold:
+            self._circuit_open = True
+            logger.warning(
+                "LLM 연속 실패 %d회 → 이번 배치의 남은 건은 LLM 호출을 건너뛰고 "
+                "폴백만 사용합니다(회로 차단). rate limit 이라면 한도를 확인하세요.",
+                self._consecutive_failures,
+            )
 
     def classify(
         self,
@@ -212,6 +236,10 @@ class LLMClient:
             return self._fallback(
                 title, truncated, interests, note="LLM_API_KEY 미설정"
             )
+        if self._should_skip_llm:
+            return self._fallback(
+                title, truncated, interests, note="회로 차단(연속 실패)"
+            )
 
         # 1차 → 2차 모델 순으로 시도. 하나라도 성공하면 정상(mark_ok) 후 반환.
         for model in self.models:
@@ -227,6 +255,7 @@ class LLMClient:
                 )
                 verdict = self._parse_verdict(data)
                 mark_ok()
+                self._record_success()
                 return verdict
             except Exception as exc:
                 logger.info(
@@ -236,6 +265,7 @@ class LLMClient:
         # 모든 LLM 계층이 실패 → 배너 플래그(quota) + 결정론적 키워드 폴백.
         logger.warning("모든 LLM 계층 실패 → 키워드 폴백 전환 (models=%s)", self.models)
         mark_degraded("quota")
+        self._record_failure()
         return self._fallback(title, truncated, interests, note="모든 LLM 계층 실패")
 
     # -- 내부 구현 ---------------------------------------------------------
@@ -347,6 +377,8 @@ class LLMClient:
         if not self.enabled:
             mark_degraded("disabled")
             return self._enrich_fallback(original, note="LLM_API_KEY 미설정")
+        if self._should_skip_llm:
+            return self._enrich_fallback(original, note="회로 차단(연속 실패)")
 
         truncated = original[:ENRICH_MAX_CONTENT_CHARS]
         messages = build_enrichment_messages(title=title, content=truncated)
@@ -357,6 +389,7 @@ class LLMClient:
                 data = self._chat_json(messages, model=model)
                 enrichment = self._parse_enrichment(data, original)
                 mark_ok()
+                self._record_success()
                 return enrichment
             except Exception as exc:
                 logger.info(
@@ -366,6 +399,7 @@ class LLMClient:
         # 모든 LLM 계층이 실패 → 배너 플래그(quota) + 오프라인(원문 보존) 폴백.
         logger.warning("모든 LLM 보강 계층 실패 → 오프라인 폴백 (models=%s)", self.models)
         mark_degraded("quota")
+        self._record_failure()
         return self._enrich_fallback(original, note="모든 LLM 계층 실패")
 
     # -- 범용 JSON 완성 — 도메인 파싱 없이 캐스케이드만 재사용 -----------------
